@@ -34,7 +34,10 @@
     }
   },
   "dependencies": {
-    "@oclif/core": "^4.11.1"
+    "@inquirer/prompts": "^8.4.2",
+    "@oclif/core": "^4.11.1",
+    "yaml": "^2.8.4",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@oclif/test": "^4",
