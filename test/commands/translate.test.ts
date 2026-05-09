@@ -63,7 +63,7 @@ describe('polypot translate', () => {
   it('exposes the resolved appConfig defaults in stub output', async () => {
     const {stdout, error} = await runCommand(['translate', '-p', 'foo.pot', '--dry-run'])
     expect(error).to.equal(undefined)
-    expect(stdout).to.include('[stub] translate logic ships in Phase 2')
+    expect(stdout).to.include('[stub] translate not implemented')
     expect(stdout).to.include('"appConfig"')
     expect(stdout).to.include('"openai"')
     expect(stdout).to.include('"batchSize": 20')

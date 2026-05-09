@@ -5,12 +5,6 @@ import {runCommand} from '@oclif/test'
 
 const BIN = path.resolve('bin/run.js')
 
-/**
- * One real subprocess test proves the shipped bin/run.js shebang, ESM
- * loader, and OCLIF bootstrap actually work end-to-end. Per-command
- * `--help` assertions use @oclif/test's in-process runner — same
- * coverage at a fraction of the cost (no node/ts-node cold start each).
- */
 describe('smoke', () => {
   it('the real bin/run.js binary executes and lists all three commands', () => {
     const result = spawnSync('node', [BIN, '--help'], {encoding: 'utf8', timeout: 30_000})

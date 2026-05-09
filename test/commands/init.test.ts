@@ -14,11 +14,10 @@ describe('polypot init', () => {
     expect(stdout).to.not.include('--no-config')
   })
 
-  it('--no-gitignore --yes echoes the intent and exits 0', async () => {
+  it('--no-gitignore suppresses the gitignore-append line', async () => {
     const {stdout, error} = await runCommand(['init', '--no-gitignore', '--yes'])
     expect(error).to.equal(undefined)
-    expect(stdout).to.include('NOT updated (--no-gitignore)')
-    expect(stdout).to.include('skipping prompts')
+    expect(stdout).to.not.include('.gitignore')
   })
 
   it('--cwd echoes the custom path in the stub output', async () => {

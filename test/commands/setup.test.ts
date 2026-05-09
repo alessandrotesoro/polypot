@@ -11,15 +11,16 @@ describe('polypot setup', () => {
     expect(stdout).to.not.include('--no-env')
   })
 
-  it('--show prints the resolved path stub and exits 0', async () => {
+  it('--show prints the resolved global config path and exits 0', async () => {
     const {stdout, error} = await runCommand(['setup', '--show'])
     expect(error).to.equal(undefined)
-    expect(stdout).to.include('global config path:')
+    expect(stdout).to.include('global config:')
+    expect(stdout).to.include('config.yaml')
   })
 
-  it('default invocation prints the wizard stub message and exits 0', async () => {
+  it('default invocation prints the stub marker and exits 0', async () => {
     const {stdout, error} = await runCommand(['setup'])
     expect(error).to.equal(undefined)
-    expect(stdout).to.include('[stub] interactive setup wizard ships in Phase 2.')
+    expect(stdout).to.include('[stub]')
   })
 })

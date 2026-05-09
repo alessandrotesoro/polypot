@@ -10,10 +10,6 @@ each target language. Settings can be supplied via CLI flags, environment
 variables (POLYPOT_*), per-project config (.polypot/config.yaml), or the
 global config — flags win, then project .env, then global .env, then
 project YAML, then global YAML, then defaults.
-
-Phase 1 ships only the command surface and the layered-config wiring.
-The actual translation pipeline (AI calls, batching, cost estimation,
-.po writing) lands in Phase 2.
 `
   static override examples = [
     '<%= config.bin %> <%= command.id %> -l fr_FR,es_ES -p translations.pot',
@@ -32,8 +28,7 @@ The actual translation pipeline (AI calls, batching, cost estimation,
     }),
     'api-key': Flags.string({
       char: 'k',
-      summary: 'Provider API key. Phase 2 wires the 5-tier env fallback (POLYPOT_OPENAI_API_KEY → OPENAI_API_KEY → POLYPOT_API_KEY → API_KEY).',
-      // Intentionally NO env: binding — Phase 2 loader handles the multi-source fallback.
+      summary: 'Provider API key.',
       helpGroup: 'PROVIDER',
     }),
     model: Flags.string({
@@ -141,18 +136,18 @@ The actual translation pipeline (AI calls, batching, cost estimation,
     // Performance
     'batch-size': Flags.integer({
       char: 'b',
-      summary: 'Strings per translation batch (Potomatic range: 1–100; ranges enforced in Phase 2).',
+      summary: 'Strings per translation batch (1–100).',
       env: polypotEnv('batch-size'),
       helpGroup: 'PERFORMANCE',
     }),
     jobs: Flags.integer({
       char: 'j',
-      summary: 'Max languages translated in parallel (Potomatic range: 1–10).',
+      summary: 'Max languages translated in parallel (1–10).',
       env: polypotEnv('jobs'),
       helpGroup: 'PERFORMANCE',
     }),
     timeout: Flags.integer({
-      summary: 'API request timeout in seconds (Potomatic range: 10–300).',
+      summary: 'API request timeout in seconds (10–300).',
       env: polypotEnv('timeout'),
       helpGroup: 'PERFORMANCE',
     }),
@@ -176,12 +171,12 @@ The actual translation pipeline (AI calls, batching, cost estimation,
 
     // Retries / failure handling
     'max-retries': Flags.integer({
-      summary: 'Retry attempts per batch (Potomatic range: 0–10).',
+      summary: 'Retry attempts per batch (0–10).',
       env: polypotEnv('max-retries'),
       helpGroup: 'RETRIES',
     }),
     'retry-delay': Flags.integer({
-      summary: 'Delay between retries in milliseconds (Potomatic range: 500–30000).',
+      summary: 'Delay between retries in milliseconds (500–30000).',
       env: polypotEnv('retry-delay'),
       helpGroup: 'RETRIES',
     }),
@@ -234,7 +229,7 @@ The actual translation pipeline (AI calls, batching, cost estimation,
 
   public async run(): Promise<unknown> {
     const result = {
-      stub: `${STUB_PHASE2} translate logic ships in Phase 2`,
+      stub: `${STUB_PHASE2} translate not implemented`,
       flags: this.flags,
       appConfig: this.appConfig,
     }

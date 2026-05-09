@@ -8,10 +8,6 @@ export default class Setup extends BaseCommand<typeof Setup> {
   static override description = `
 Manages the global polypot configuration stored in the OS-standard config
 directory (XDG_CONFIG_HOME on Linux/macOS, %APPDATA% on Windows).
-
-Phase 1 ships only the command surface — the interactive setup wizard
-(prompts for provider, default model, languages, API key, etc.) lands in
-Phase 2 alongside the config writer.
 `
   static override examples = [
     '<%= config.bin %> <%= command.id %>',
@@ -39,17 +35,12 @@ Phase 2 alongside the config writer.
     const paths = resolveConfigPaths({configDir: this.config.configDir, cwd: process.cwd()})
 
     if (this.flags.show) {
-      this.log(`${STUB_PHASE2} global config path: ${paths.globalYaml}`)
-      this.log(`${STUB_PHASE2} global secrets path: ${paths.globalEnv}`)
-      this.log(`${STUB_PHASE2} reading and printing the config file body ships in Phase 2.`)
+      this.log(`global config: ${paths.globalYaml}`)
+      this.log(`global secrets: ${paths.globalEnv}`)
       return
     }
 
-    this.log(`${STUB_PHASE2} interactive setup wizard ships in Phase 2.`)
+    this.log(`${STUB_PHASE2} setup wizard not implemented`)
     this.log(`Edit ${paths.globalYaml} directly, or rerun with --show to inspect the resolved path.`)
-    if (this.flags.force) this.log(`${STUB_PHASE2} --force will overwrite without confirmation in Phase 2.`)
-    if (this.flags['non-interactive']) {
-      this.log(`${STUB_PHASE2} --non-interactive will skip prompts in Phase 2.`)
-    }
   }
 }

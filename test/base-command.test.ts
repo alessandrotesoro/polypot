@@ -5,13 +5,10 @@ import {BaseCommand} from '../src/base-command.js'
 
 class Probe extends BaseCommand<typeof Probe> {
   static override flags = {}
-  /** Test-only public accessor for the protected appConfig. */
   public getAppConfig(): PolypotConfig {
     return this.appConfig
   }
-  async run(): Promise<void> {
-    // no-op
-  }
+  async run(): Promise<void> {}
 }
 
 describe('BaseCommand', () => {
@@ -24,7 +21,7 @@ describe('BaseCommand', () => {
     expect(appConfig.performance.batchSize).to.equal(20)
   })
 
-  it('declares no static baseFlags (regression guard for D8)', () => {
+  it('declares no static baseFlags', () => {
     expect((BaseCommand as unknown as {baseFlags?: unknown}).baseFlags).to.equal(undefined)
   })
 })
