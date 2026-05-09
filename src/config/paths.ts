@@ -1,17 +1,17 @@
 import path from 'node:path'
 
 export interface ConfigPaths {
-  globalYaml: string
-  globalEnv: string
-  projectYaml: string
-  projectEnv: string
+  readonly globalYaml: string
+  readonly globalEnv: string
+  readonly projectYaml: string
+  readonly projectEnv: string
 }
 
 export interface ResolveConfigPathsOptions {
   /** OCLIF's `this.config.configDir` (XDG-aware on Unix, %LOCALAPPDATA% on Windows). */
-  configDir: string
+  readonly configDir: string
   /** Project working directory — `.polypot/` is resolved underneath this. */
-  cwd: string
+  readonly cwd: string
 }
 
 /**

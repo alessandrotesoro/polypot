@@ -11,20 +11,20 @@ import {resolveConfigPaths} from './paths.js'
 
 export interface LoadPolypotConfigOptions {
   /** Read from this YAML path instead of running discovery. */
-  configPath?: string
+  readonly configPath?: string
   /** Skip both YAML reads (global and project). */
-  noConfig?: boolean
+  readonly noConfig?: boolean
   /** Skip both .env reads (global and project). */
-  noEnv?: boolean
+  readonly noEnv?: boolean
 }
 
 export interface LoadPolypotConfigArgs {
   /** OCLIF's `this.config.configDir`. */
-  configDir: string
+  readonly configDir: string
   /** Project working directory. */
-  cwd: string
+  readonly cwd: string
   /** User-controlled discovery toggles parsed from the active command's flags. */
-  options?: LoadPolypotConfigOptions
+  readonly options?: LoadPolypotConfigOptions
 }
 
 /**
@@ -33,10 +33,9 @@ export interface LoadPolypotConfigArgs {
  * Phase 1: returns schema defaults regardless of inputs.
  * Phase 2: implement the full pipeline below.
  */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-export async function loadPolypotConfig(args: LoadPolypotConfigArgs): Promise<PolypotConfig> {
-  // Phase 2: resolve config paths from args (paths.ts is already implemented).
-  // const paths = resolveConfigPaths({configDir: args.configDir, cwd: args.cwd})
+export async function loadPolypotConfig(_args: LoadPolypotConfigArgs): Promise<PolypotConfig> {
+  // Phase 2: resolve config paths from _args (paths.ts is already implemented).
+  // const paths = resolveConfigPaths({configDir: _args.configDir, cwd: _args.cwd})
 
   // Phase 2: read YAML layers (global + project) via yaml.parse(fs.readFileSync(...)).
   //          Honour args.options.noConfig (skip both) and args.options.configPath (use this single file).

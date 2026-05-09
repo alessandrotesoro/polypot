@@ -1,9 +1,14 @@
 import {expect} from 'chai'
 import {Config} from '@oclif/core'
+import type {PolypotConfig} from '../src/config/schema.js'
 import {BaseCommand} from '../src/base-command.js'
 
 class Probe extends BaseCommand<typeof Probe> {
   static override flags = {}
+  /** Test-only public accessor for the protected appConfig. */
+  public getAppConfig(): PolypotConfig {
+    return this.appConfig
+  }
   async run(): Promise<void> {
     // no-op
   }
@@ -14,11 +19,12 @@ describe('BaseCommand', () => {
     const config = await Config.load(process.cwd())
     const probe = new Probe([], config)
     await probe.init()
-    expect((probe as any).appConfig.provider.provider).to.equal('openai')
-    expect((probe as any).appConfig.performance.batchSize).to.equal(20)
+    const appConfig = probe.getAppConfig()
+    expect(appConfig.provider.provider).to.equal('openai')
+    expect(appConfig.performance.batchSize).to.equal(20)
   })
 
   it('declares no static baseFlags (regression guard for D8)', () => {
-    expect((BaseCommand as any).baseFlags).to.equal(undefined)
+    expect((BaseCommand as unknown as {baseFlags?: unknown}).baseFlags).to.equal(undefined)
   })
 })
