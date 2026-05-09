@@ -2,3 +2,8 @@
 .agents/
 docs/
 skills-lock.json
+node_modules/
+dist/
+oclif.manifest.json
+*.log
+.DS_Store
