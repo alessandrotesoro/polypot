@@ -20,7 +20,6 @@ project YAML, then global YAML, then defaults.
   static override enableJsonFlag = true
 
   static override flags = {
-    // Provider / model
     provider: Flags.string({
       summary: 'AI provider (e.g. openai, gemini, anthropic). Auto-detected from API key when omitted.',
       env: polypotEnv('provider'),
@@ -54,7 +53,6 @@ project YAML, then global YAML, then defaults.
       helpGroup: 'PROVIDER',
     }),
 
-    // Source / target
     'target-languages': Flags.string({
       char: 'l',
       summary: 'Target language codes, comma-separated (e.g. fr_FR,es_ES,de_DE).',
@@ -75,7 +73,6 @@ project YAML, then global YAML, then defaults.
       helpGroup: 'SOURCE',
     }),
 
-    // Output
     'output-dir': Flags.string({
       char: 'o',
       summary: 'Directory to save generated .po files for each language.',
@@ -105,7 +102,6 @@ project YAML, then global YAML, then defaults.
       helpGroup: 'OUTPUT',
     })(),
 
-    // Translation behaviour
     'force-translate': Flags.boolean({
       char: 'F',
       summary: 'Re-translate all strings, ignoring any existing translations.',
@@ -133,7 +129,6 @@ project YAML, then global YAML, then defaults.
       helpGroup: 'BEHAVIOR',
     }),
 
-    // Performance
     'batch-size': Flags.integer({
       char: 'b',
       summary: 'Strings per translation batch (1–100).',
@@ -152,7 +147,6 @@ project YAML, then global YAML, then defaults.
       helpGroup: 'PERFORMANCE',
     }),
 
-    // Limits
     'max-strings-per-job': Flags.integer({
       summary: 'Limit the number of strings translated per language (testing aid).',
       env: polypotEnv('max-strings-per-job'),
@@ -169,7 +163,6 @@ project YAML, then global YAML, then defaults.
       helpGroup: 'LIMITS',
     }),
 
-    // Retries / failure handling
     'max-retries': Flags.integer({
       summary: 'Retry attempts per batch (0–10).',
       env: polypotEnv('max-retries'),
@@ -191,7 +184,6 @@ project YAML, then global YAML, then defaults.
       helpGroup: 'RETRIES',
     }),
 
-    // Debugging
     'verbose-level': Flags.integer({
       char: 'v',
       summary: 'Verbosity level: 0=errors, 1=normal, 2=verbose, 3=debug.',
@@ -209,7 +201,6 @@ project YAML, then global YAML, then defaults.
       helpGroup: 'DEBUG',
     }),
 
-    // Polypot config-discovery overrides (translate-only per D8)
     config: Flags.string({
       summary: 'Use this YAML file as the only config source (bypasses discovery).',
       env: polypotEnv('config'),

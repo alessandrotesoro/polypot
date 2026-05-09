@@ -33,7 +33,7 @@ committed.
       default: true,
       allowNo: true,
       helpLabel: '--[no-]gitignore',
-      summary: 'Append .polypot/.env to the project .gitignore (default: true). Use --no-gitignore to skip.',
+      summary: 'Append .polypot/.env to the project .gitignore (default).',
       env: polypotEnv('gitignore'),
     }),
     yes: Flags.boolean({

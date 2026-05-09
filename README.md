@@ -16,13 +16,13 @@ npm run build
 ## Quick start
 
 ```bash
-# Configure global defaults (interactive wizard ships in Phase 2)
+# Configure global defaults
 ./bin/run.js setup
 
 # Initialise per-project config in the current directory
 ./bin/run.js init
 
-# Translate a .pot file (Phase 2 implements the actual translation)
+# Translate a .pot file
 ./bin/run.js translate -l fr_FR,es_ES -p translations.pot
 ```
 

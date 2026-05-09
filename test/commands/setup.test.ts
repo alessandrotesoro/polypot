@@ -2,7 +2,7 @@ import {expect} from 'chai'
 import {runCommand} from '@oclif/test'
 
 describe('polypot setup', () => {
-  it('lists --force, --show, --non-interactive in --help (no inherited config flags)', async () => {
+  it('lists its own flags and does not inherit translate-only config flags', async () => {
     const {stdout} = await runCommand(['setup', '--help'])
     expect(stdout).to.include('--force')
     expect(stdout).to.include('--show')

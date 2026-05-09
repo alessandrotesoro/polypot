@@ -2,23 +2,14 @@ import {expect} from 'chai'
 import {runCommand} from '@oclif/test'
 
 const EXPECTED_FLAGS = [
-  // Provider
   '--provider', '--api-key', '--model', '--temperature', '--max-tokens', '--source-language',
-  // Source
   '--target-languages', '--pot-file-path', '--input-po-path',
-  // Output
   '--output-dir', '--output-format', '--output-file', '--po-file-prefix', '--locale-format',
-  // Behavior
   '--force-translate', '--use-dictionary', '--dictionary-path', '--prompt-file-path', '--po-header-template-path',
-  // Performance
   '--batch-size', '--jobs', '--timeout',
-  // Limits
   '--max-strings-per-job', '--max-total-strings', '--max-cost',
-  // Retries
   '--max-retries', '--retry-delay', '--abort-on-failure', '--skip-language-on-failure',
-  // Debug
   '--verbose-level', '--dry-run', '--save-debug-info',
-  // Polypot config-discovery
   '--config', '--no-config', '--no-env',
 ]
 

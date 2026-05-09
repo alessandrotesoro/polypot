@@ -22,7 +22,7 @@ directory (XDG_CONFIG_HOME on Linux/macOS, %APPDATA% on Windows).
       env: polypotEnv('force'),
     }),
     show: Flags.boolean({
-      summary: 'Print the resolved global config path (and contents in Phase 2) and exit.',
+      summary: 'Print the resolved global config paths and exit.',
       env: polypotEnv('show'),
     }),
     'non-interactive': Flags.boolean({
