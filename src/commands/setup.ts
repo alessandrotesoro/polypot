@@ -1,7 +1,7 @@
 import {Flags} from '@oclif/core'
 import {BaseCommand} from '../base-command.js'
 import {resolveConfigPaths} from '../config/paths.js'
-import {polypotEnv, STUB_PHASE2} from '../flag-helpers.js'
+import {polypotEnv, STUB} from '../flag-helpers.js'
 
 export default class Setup extends BaseCommand<typeof Setup> {
   static override summary = 'Configure polypot defaults shared across all projects'
@@ -40,7 +40,7 @@ directory (XDG_CONFIG_HOME on Linux/macOS, %APPDATA% on Windows).
       return
     }
 
-    this.log(`${STUB_PHASE2} setup wizard not implemented`)
+    this.log(`${STUB} setup wizard not implemented`)
     this.log(`Edit ${paths.globalYaml} directly, or rerun with --show to inspect the resolved path.`)
   }
 }

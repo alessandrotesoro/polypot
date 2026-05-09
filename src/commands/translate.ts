@@ -1,6 +1,6 @@
 import {Flags} from '@oclif/core'
 import {BaseCommand} from '../base-command.js'
-import {polypotEnv, STUB_PHASE2} from '../flag-helpers.js'
+import {polypotEnv, STUB} from '../flag-helpers.js'
 
 export default class Translate extends BaseCommand<typeof Translate> {
   static override summary = 'Translate a .pot file into one or more languages using AI'
@@ -217,7 +217,7 @@ each target language.
 
   public async run(): Promise<unknown> {
     const result = {
-      stub: `${STUB_PHASE2} translate not implemented`,
+      stub: `${STUB} translate not implemented`,
       flags: this.flags,
       appConfig: this.appConfig,
     }

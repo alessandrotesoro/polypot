@@ -2,7 +2,7 @@ import {Flags} from '@oclif/core'
 import path from 'node:path'
 import {BaseCommand} from '../base-command.js'
 import {resolveConfigPaths} from '../config/paths.js'
-import {polypotEnv, STUB_PHASE2} from '../flag-helpers.js'
+import {polypotEnv, STUB} from '../flag-helpers.js'
 
 export default class Init extends BaseCommand<typeof Init> {
   static override summary = 'Initialise polypot configuration in the current project'
@@ -48,7 +48,7 @@ committed.
     const paths = resolveConfigPaths({configDir: this.config.configDir, cwd: targetCwd})
     const gitignorePath = path.join(targetCwd, '.gitignore')
 
-    this.log(`${STUB_PHASE2} init not implemented. Would write:`)
+    this.log(`${STUB} init not implemented. Would write:`)
     this.log(`  ${paths.projectYaml}${this.flags.force ? ' (force overwrite)' : ''}`)
     this.log(`  ${paths.projectEnv}${this.flags.force ? ' (force overwrite)' : ''}`)
     if (this.flags.gitignore) this.log(`  append ".polypot/.env" to ${gitignorePath}`)
