@@ -2,6 +2,7 @@ import {Flags} from '@oclif/core'
 import path from 'node:path'
 import {BaseCommand} from '../base-command.js'
 import {resolveConfigPaths} from '../config/paths.js'
+import {polypotEnv, STUB_PHASE2} from '../flag-helpers.js'
 
 export default class Init extends BaseCommand<typeof Init> {
   static override summary = 'Initialise polypot configuration in the current project'
@@ -24,27 +25,26 @@ land in Phase 2 alongside the wizard.
     force: Flags.boolean({
       char: 'f',
       summary: 'Overwrite existing .polypot/ files.',
-      env: 'POLYPOT_FORCE',
+      env: polypotEnv('force'),
     }),
     cwd: Flags.string({
       summary: 'Target project directory (defaults to the current working directory).',
       defaultHelp: 'process.cwd()',
-      env: 'POLYPOT_CWD',
+      env: polypotEnv('cwd'),
     }),
     // R15: --no-gitignore is auto-derived from `gitignore` via allowNo.
-    // Primary name is `gitignore` (boolean, default true). Env var follows
-    // the primary name: POLYPOT_GITIGNORE (set to "false" to suppress).
+    // Env var follows the primary flag name: POLYPOT_GITIGNORE (set to "false" to suppress).
     gitignore: Flags.boolean({
       default: true,
       allowNo: true,
       helpLabel: '--[no-]gitignore',
       summary: 'Append .polypot/.env to the project .gitignore (default: true). Use --no-gitignore to skip.',
-      env: 'POLYPOT_GITIGNORE',
+      env: polypotEnv('gitignore'),
     }),
     yes: Flags.boolean({
       char: 'y',
       summary: 'Accept defaults non-interactively.',
-      env: 'POLYPOT_YES',
+      env: polypotEnv('yes'),
     }),
   }
 
@@ -53,7 +53,7 @@ land in Phase 2 alongside the wizard.
     const paths = resolveConfigPaths({configDir: this.config.configDir, cwd: targetCwd})
     const gitignorePath = path.join(targetCwd, '.gitignore')
 
-    this.log(`[stub] polypot init would create the following in ${targetCwd}:`)
+    this.log(`${STUB_PHASE2} polypot init would create the following in ${targetCwd}:`)
     this.log(`  - ${paths.projectYaml}${this.flags.force ? ' (force overwrite)' : ' (no overwrite)'}`)
     this.log(`  - ${paths.projectEnv}${this.flags.force ? ' (force overwrite)' : ' (no overwrite)'}`)
     if (this.flags.gitignore) {
@@ -62,6 +62,6 @@ land in Phase 2 alongside the wizard.
       this.log('  - .gitignore: NOT updated (--no-gitignore)')
     }
     if (this.flags.yes) this.log('  - skipping prompts (--yes)')
-    this.log('[stub] actual writes ship in Phase 2.')
+    this.log(`${STUB_PHASE2} actual writes ship in Phase 2.`)
   }
 }

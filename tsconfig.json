@@ -6,6 +6,8 @@
     "moduleResolution": "NodeNext",
     "outDir": "dist",
     "rootDir": "src",
+    "incremental": true,
+    "tsBuildInfoFile": "./dist/.tsbuildinfo",
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "noImplicitOverride": true,

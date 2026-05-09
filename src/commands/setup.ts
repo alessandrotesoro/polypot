@@ -1,6 +1,7 @@
 import {Flags} from '@oclif/core'
 import {BaseCommand} from '../base-command.js'
 import {resolveConfigPaths} from '../config/paths.js'
+import {polypotEnv, STUB_PHASE2} from '../flag-helpers.js'
 
 export default class Setup extends BaseCommand<typeof Setup> {
   static override summary = 'Configure polypot defaults shared across all projects'
@@ -22,15 +23,15 @@ Phase 2 alongside the config writer.
     force: Flags.boolean({
       char: 'f',
       summary: 'Overwrite existing global config without prompting.',
-      env: 'POLYPOT_FORCE',
+      env: polypotEnv('force'),
     }),
     show: Flags.boolean({
       summary: 'Print the resolved global config path (and contents in Phase 2) and exit.',
-      env: 'POLYPOT_SHOW',
+      env: polypotEnv('show'),
     }),
     'non-interactive': Flags.boolean({
       summary: 'Skip prompts; useful for scripted setup. Errors out on prompt-only flows.',
-      env: 'POLYPOT_NON_INTERACTIVE',
+      env: polypotEnv('non-interactive'),
     }),
   }
 
@@ -38,17 +39,17 @@ Phase 2 alongside the config writer.
     const paths = resolveConfigPaths({configDir: this.config.configDir, cwd: process.cwd()})
 
     if (this.flags.show) {
-      this.log(`[stub] global config path: ${paths.globalYaml}`)
-      this.log(`[stub] global secrets path: ${paths.globalEnv}`)
-      this.log('[stub] reading and printing the config file body ships in Phase 2.')
+      this.log(`${STUB_PHASE2} global config path: ${paths.globalYaml}`)
+      this.log(`${STUB_PHASE2} global secrets path: ${paths.globalEnv}`)
+      this.log(`${STUB_PHASE2} reading and printing the config file body ships in Phase 2.`)
       return
     }
 
-    this.log('[stub] interactive setup wizard ships in Phase 2.')
+    this.log(`${STUB_PHASE2} interactive setup wizard ships in Phase 2.`)
     this.log(`Edit ${paths.globalYaml} directly, or rerun with --show to inspect the resolved path.`)
-    if (this.flags.force) this.log('[stub] --force will overwrite without confirmation in Phase 2.')
+    if (this.flags.force) this.log(`${STUB_PHASE2} --force will overwrite without confirmation in Phase 2.`)
     if (this.flags['non-interactive']) {
-      this.log('[stub] --non-interactive will skip prompts in Phase 2.')
+      this.log(`${STUB_PHASE2} --non-interactive will skip prompts in Phase 2.`)
     }
   }
 }
