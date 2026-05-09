@@ -48,9 +48,9 @@ committed.
     const paths = resolveConfigPaths({configDir: this.config.configDir, cwd: targetCwd})
     const gitignorePath = path.join(targetCwd, '.gitignore')
 
-    this.log(`${STUB_PHASE2} init not implemented. Would create in ${targetCwd}:`)
-    this.log(`  - ${paths.projectYaml}${this.flags.force ? ' (force overwrite)' : ''}`)
-    this.log(`  - ${paths.projectEnv}${this.flags.force ? ' (force overwrite)' : ''}`)
-    if (this.flags.gitignore) this.log(`  - append ".polypot/.env" to ${gitignorePath}`)
+    this.log(`${STUB_PHASE2} init not implemented. Would write:`)
+    this.log(`  ${paths.projectYaml}${this.flags.force ? ' (force overwrite)' : ''}`)
+    this.log(`  ${paths.projectEnv}${this.flags.force ? ' (force overwrite)' : ''}`)
+    if (this.flags.gitignore) this.log(`  append ".polypot/.env" to ${gitignorePath}`)
   }
 }

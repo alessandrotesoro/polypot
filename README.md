@@ -2,7 +2,7 @@
 
 AI-powered translation CLI for `.pot` files. A from-scratch reimagining of [Potomatic](https://github.com/GravityKit/Potomatic) built on [OCLIF](https://oclif.io).
 
-> **Phase 1 status:** the CLI surface (commands, flags, config discovery) is complete. The translation engine, AI provider clients, and `.po` file writers ship in Phase 2.
+> **Status:** scaffold release. The CLI surface (commands, flags, config discovery) is wired up, but command bodies are stubs — no translation work happens yet.
 
 ## Install
 

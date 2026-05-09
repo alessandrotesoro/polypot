@@ -6,10 +6,7 @@ export default class Translate extends BaseCommand<typeof Translate> {
   static override summary = 'Translate a .pot file into one or more languages using AI'
   static override description = `
 Reads source strings from a .pot file and writes translated .po files for
-each target language. Settings can be supplied via CLI flags, environment
-variables (POLYPOT_*), per-project config (.polypot/config.yaml), or the
-global config — flags win, then project .env, then global .env, then
-project YAML, then global YAML, then defaults.
+each target language.
 `
   static override examples = [
     '<%= config.bin %> <%= command.id %> -l fr_FR,es_ES -p translations.pot',
@@ -21,7 +18,7 @@ project YAML, then global YAML, then defaults.
 
   static override flags = {
     provider: Flags.string({
-      summary: 'AI provider (e.g. openai, gemini, anthropic). Auto-detected from API key when omitted.',
+      summary: 'AI provider (e.g. openai, gemini, anthropic).',
       env: polypotEnv('provider'),
       helpGroup: 'PROVIDER',
     }),
@@ -42,13 +39,13 @@ project YAML, then global YAML, then defaults.
       helpGroup: 'PROVIDER',
     }),
     'max-tokens': Flags.integer({
-      summary: 'Max completion tokens (1–32768, auto-calculated when omitted).',
+      summary: 'Max completion tokens (1–32768).',
       env: polypotEnv('max-tokens'),
       helpGroup: 'PROVIDER',
     }),
     'source-language': Flags.string({
       char: 's',
-      summary: 'Source language code (default: en).',
+      summary: 'Source language code.',
       env: polypotEnv('source-language'),
       helpGroup: 'PROVIDER',
     }),
@@ -81,7 +78,7 @@ project YAML, then global YAML, then defaults.
     }),
     'output-format': Flags.option({
       options: ['console', 'json'] as const,
-      summary: 'Output format: console (default) or json.',
+      summary: 'Output format.',
       env: polypotEnv('output-format'),
       helpGroup: 'OUTPUT',
     })(),

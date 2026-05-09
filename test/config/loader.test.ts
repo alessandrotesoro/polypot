@@ -2,8 +2,8 @@ import {expect} from 'chai'
 import {loadPolypotConfig} from '../../src/config/loader.js'
 import {resolveConfigPaths} from '../../src/config/paths.js'
 
-describe('loader (Phase 1 stub)', () => {
-  it('returns a valid PolypotConfig with defaults regardless of inputs', async () => {
+describe('loadPolypotConfig', () => {
+  it('returns a valid PolypotConfig with defaults', async () => {
     const config = await loadPolypotConfig({configDir: '/tmp/x', cwd: '/tmp/y', options: {}})
     expect(config.provider.provider).to.equal('openai')
     expect(config.performance.batchSize).to.equal(20)

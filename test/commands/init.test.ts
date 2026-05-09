@@ -27,7 +27,7 @@ describe('polypot init', () => {
     expect(stdout).to.include(customCwd)
   })
 
-  it('does not create or modify any file (Phase 1 stub regression guard)', async () => {
+  it('does not create or modify any file', async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'polypot-init-'))
     const gitignorePath = path.join(tempDir, '.gitignore')
     const originalGitignore = '# existing rules\nnode_modules/\n'
