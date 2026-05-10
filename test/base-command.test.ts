@@ -21,6 +21,14 @@ describe('BaseCommand', () => {
     expect(appConfig.performance.batchSize).to.equal(20)
   })
 
+  it('does not expose runtime secrets through appConfig', async () => {
+    const config = await Config.load(process.cwd())
+    const probe = new Probe([], config)
+    await probe.init()
+
+    expect(JSON.stringify(probe.getAppConfig())).to.not.include('OPENAI_API_KEY')
+  })
+
   it('declares no static baseFlags', () => {
     expect((BaseCommand as unknown as {baseFlags?: unknown}).baseFlags).to.equal(undefined)
   })

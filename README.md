@@ -2,7 +2,7 @@
 
 AI-powered translation CLI for `.pot` files. A from-scratch reimagining of [Potomatic](https://github.com/GravityKit/Potomatic) built on [OCLIF](https://oclif.io).
 
-> **Status:** scaffold release. The CLI surface (commands, flags, config discovery) is wired up, but command bodies are stubs — no translation work happens yet.
+> **Status:** early CLI release. `polypot setup` writes global OpenAI connection defaults; `init` and `translate` are still scaffolded and no translation work happens yet.
 
 ## Install
 
@@ -19,25 +19,23 @@ npm run build
 # Configure global defaults
 ./bin/run.js setup
 
-# Initialise per-project config in the current directory
+# Initialise per-project config in the current directory (currently scaffolded)
 ./bin/run.js init
 
-# Translate a .pot file
+# Translate a .pot file (currently scaffolded)
 ./bin/run.js translate -l fr_FR,es_ES -p translations.pot
 ```
 
 ## Configuration
 
-Polypot reads configuration from layered sources (highest precedence wins):
+`polypot setup` writes machine-wide defaults to the OCLIF config directory:
 
-1. CLI flags
-2. Project `.env` file (`<cwd>/.polypot/.env`) — gitignored, holds secrets
-3. Global `.env` file (`<configDir>/.env`) — your machine's secrets
-4. Project YAML (`<cwd>/.polypot/config.yaml`) — committed to your repo
-5. Global YAML (`<configDir>/config.yaml`) — your machine's defaults
-6. Built-in defaults
+- `<configDir>/config.yaml` for non-secret defaults such as provider, model, temperature, source language, and target languages.
+- `<configDir>/.env` for `OPENAI_API_KEY`.
 
 `<configDir>` resolves to `~/.config/polypot` on Linux/macOS and `%LOCALAPPDATA%\polypot` on Windows (XDG-aware).
+
+Project config, project `.env`, and full CLI precedence layering are planned follow-up work.
 
 ## Commands
 
@@ -58,19 +56,16 @@ FLAGS
   -f, --force        [env: POLYPOT_FORCE] Overwrite existing .polypot/ files.
   -y, --yes          [env: POLYPOT_YES] Accept defaults non-interactively.
       --cwd=<value>  [env: POLYPOT_CWD] Target project directory (defaults to the current working directory).
-  --[no-]gitignore   [env: POLYPOT_GITIGNORE] Append .polypot/.env to the project .gitignore (default: true). Use
-                     --no-gitignore to skip.
+  --[no-]gitignore   [env: POLYPOT_GITIGNORE] Append .polypot/.env to the project .gitignore (default).
 
 DESCRIPTION
   Initialise polypot configuration in the current project
 
 
-  Creates a per-project .polypot/ directory with config.yaml and .env, and
-  appends .polypot/.env to the project's .gitignore so secrets are not
-  committed.
+  Scaffolded command for future per-project config creation.
 
-  Phase 1 ships only the command surface — the actual filesystem writes
-  land in Phase 2 alongside the wizard.
+  Current release prints the files it would write, but does not create
+  .polypot/config.yaml, .polypot/.env, or update .gitignore yet.
 
 
 EXAMPLES
@@ -95,7 +90,8 @@ FLAGS
   -f, --force            [env: POLYPOT_FORCE] Overwrite existing global config without prompting.
       --non-interactive  [env: POLYPOT_NON_INTERACTIVE] Skip prompts; useful for scripted setup. Errors out on
                          prompt-only flows.
-      --show             [env: POLYPOT_SHOW] Print the resolved global config path (and contents in Phase 2) and exit.
+      --show             [env: POLYPOT_SHOW] Print the resolved global config paths, non-secret config, and secret
+                         presence.
 
 DESCRIPTION
   Configure polypot defaults shared across all projects
@@ -104,9 +100,8 @@ DESCRIPTION
   Manages the global polypot configuration stored in the OS-standard config
   directory (XDG_CONFIG_HOME on Linux/macOS, %APPDATA% on Windows).
 
-  Phase 1 ships only the command surface — the interactive setup wizard
-  (prompts for provider, default model, languages, API key, etc.) lands in
-  Phase 2 alongside the config writer.
+  The wizard stores OpenAI credentials in the global .env file and writes
+  non-secret defaults to the global YAML config.
 
 
 EXAMPLES
@@ -144,20 +139,16 @@ BEHAVIOR FLAGS
                                          translations.
 
 PERFORMANCE FLAGS
-  -b, --batch-size=<value>  [env: POLYPOT_BATCH_SIZE] Strings per translation batch (Potomatic range: 1–100; ranges
-                            enforced in Phase 2).
-  -j, --jobs=<value>        [env: POLYPOT_JOBS] Max languages translated in parallel (Potomatic range: 1–10).
-      --timeout=<value>     [env: POLYPOT_TIMEOUT] API request timeout in seconds (Potomatic range: 10–300).
+  -b, --batch-size=<value>  [env: POLYPOT_BATCH_SIZE] Strings per translation batch (1–100).
+  -j, --jobs=<value>        [env: POLYPOT_JOBS] Max languages translated in parallel (1–10).
+      --timeout=<value>     [env: POLYPOT_TIMEOUT] API request timeout in seconds (10–300).
 
 PROVIDER FLAGS
-  -k, --api-key=<value>          Provider API key. Phase 2 wires the 5-tier env fallback (POLYPOT_OPENAI_API_KEY →
-                                 OPENAI_API_KEY → POLYPOT_API_KEY → API_KEY).
+  -k, --api-key=<value>          Provider API key.
   -m, --model=<value>            [env: POLYPOT_MODEL] AI model name (e.g. gpt-4.1-mini).
-  -s, --source-language=<value>  [env: POLYPOT_SOURCE_LANGUAGE] Source language code (default: en).
-      --max-tokens=<value>       [env: POLYPOT_MAX_TOKENS] Max completion tokens (1–32768, auto-calculated when
-                                 omitted).
-      --provider=<value>         [env: POLYPOT_PROVIDER] AI provider (e.g. openai, gemini, anthropic). Auto-detected
-                                 from API key when omitted.
+  -s, --source-language=<value>  [env: POLYPOT_SOURCE_LANGUAGE] Source language code.
+      --max-tokens=<value>       [env: POLYPOT_MAX_TOKENS] Max completion tokens (1–32768).
+      --provider=<value>         [env: POLYPOT_PROVIDER] AI provider (e.g. openai, gemini, anthropic).
       --temperature=<value>      [env: POLYPOT_TEMPERATURE] Sampling temperature (0.0–2.0). Lower = more deterministic.
 
 SOURCE FLAGS
@@ -173,7 +164,7 @@ OUTPUT FLAGS
                                 input).
                                 <options: wp_locale|iso_639_1|iso_639_2|target_lang>
       --output-file=<value>     [env: POLYPOT_OUTPUT_FILE] Path to save JSON output (stdout when omitted).
-      --output-format=<option>  [env: POLYPOT_OUTPUT_FORMAT] Output format: console (default) or json.
+      --output-format=<option>  [env: POLYPOT_OUTPUT_FORMAT] Output format.
                                 <options: console|json>
       --po-file-prefix=<value>  [env: POLYPOT_PO_FILE_PREFIX] Prefix for each output .po file (e.g. "app-" →
                                 "app-fr_FR.po").
@@ -186,9 +177,8 @@ DEBUG FLAGS
 RETRIES FLAGS
   --abort-on-failure          [env: POLYPOT_ABORT_ON_FAILURE] Abort the entire run if any batch fails all retry
                               attempts.
-  --max-retries=<value>       [env: POLYPOT_MAX_RETRIES] Retry attempts per batch (Potomatic range: 0–10).
-  --retry-delay=<value>       [env: POLYPOT_RETRY_DELAY] Delay between retries in milliseconds (Potomatic range:
-                              500–30000).
+  --max-retries=<value>       [env: POLYPOT_MAX_RETRIES] Retry attempts per batch (0–10).
+  --retry-delay=<value>       [env: POLYPOT_RETRY_DELAY] Delay between retries in milliseconds (500–30000).
   --skip-language-on-failure  [env: POLYPOT_SKIP_LANGUAGE_ON_FAILURE] Skip current language on failure and continue with
                               remaining languages.
 
@@ -211,14 +201,7 @@ DESCRIPTION
 
 
   Reads source strings from a .pot file and writes translated .po files for
-  each target language. Settings can be supplied via CLI flags, environment
-  variables (POLYPOT_*), per-project config (.polypot/config.yaml), or the
-  global config — flags win, then project .env, then global .env, then
-  project YAML, then global YAML, then defaults.
-
-  Phase 1 ships only the command surface and the layered-config wiring.
-  The actual translation pipeline (AI calls, batching, cost estimation,
-  .po writing) lands in Phase 2.
+  each target language.
 
 
 EXAMPLES

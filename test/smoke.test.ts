@@ -1,4 +1,5 @@
 import {expect} from 'chai'
+import fs from 'node:fs'
 import {spawnSync} from 'node:child_process'
 import path from 'node:path'
 import {runCommand} from '@oclif/test'
@@ -27,5 +28,14 @@ describe('smoke', () => {
       expect(stdout).to.include(`polypot ${cmd}`)
       expect(stderr, `${cmd} --help stderr`).to.not.match(/warn|fail|error/i)
     }
+  })
+
+  it('README documents the setup command as implemented', () => {
+    const readme = fs.readFileSync('README.md', 'utf8')
+    expect(readme).to.include('polypot setup')
+    expect(readme).to.include('--show')
+    expect(readme).to.include('--non-interactive')
+    expect(readme).to.include('OPENAI_API_KEY')
+    expect(readme).to.not.include('setup wizard not implemented')
   })
 })

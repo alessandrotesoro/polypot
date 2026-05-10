@@ -1,15 +1,15 @@
-import {Flags} from '@oclif/core'
+import {Command, Flags} from '@oclif/core'
 import path from 'node:path'
-import {BaseCommand} from '../base-command.js'
 import {resolveConfigPaths} from '../config/paths.js'
 import {polypotEnv, STUB} from '../flag-helpers.js'
 
-export default class Init extends BaseCommand<typeof Init> {
+export default class Init extends Command {
   static override summary = 'Initialise polypot configuration in the current project'
   static override description = `
-Creates a per-project .polypot/ directory with config.yaml and .env, and
-appends .polypot/.env to the project's .gitignore so secrets are not
-committed.
+Scaffolded command for future per-project config creation.
+
+Current release prints the files it would write, but does not create
+.polypot/config.yaml, .polypot/.env, or update .gitignore yet.
 `
   static override examples = [
     '<%= config.bin %> <%= command.id %>',
@@ -44,13 +44,14 @@ committed.
   }
 
   public async run(): Promise<void> {
-    const targetCwd = this.flags.cwd ?? process.cwd()
+    const {flags} = await this.parse(Init)
+    const targetCwd = flags.cwd ?? process.cwd()
     const paths = resolveConfigPaths({configDir: this.config.configDir, cwd: targetCwd})
     const gitignorePath = path.join(targetCwd, '.gitignore')
 
     this.log(`${STUB} init not implemented. Would write:`)
-    this.log(`  ${paths.projectYaml}${this.flags.force ? ' (force overwrite)' : ''}`)
-    this.log(`  ${paths.projectEnv}${this.flags.force ? ' (force overwrite)' : ''}`)
-    if (this.flags.gitignore) this.log(`  append ".polypot/.env" to ${gitignorePath}`)
+    this.log(`  ${paths.projectYaml}${flags.force ? ' (force overwrite)' : ''}`)
+    this.log(`  ${paths.projectEnv}${flags.force ? ' (force overwrite)' : ''}`)
+    if (flags.gitignore) this.log(`  append ".polypot/.env" to ${gitignorePath}`)
   }
 }
