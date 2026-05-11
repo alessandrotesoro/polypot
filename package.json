@@ -1,54 +1,60 @@
 {
-  "name": "polypot",
-  "version": "0.1.0",
-  "description": "AI-powered translation CLI for .pot files",
-  "license": "MIT",
-  "author": "",
-  "type": "module",
-  "bin": {
-    "polypot": "./bin/run.js"
-  },
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
-  "files": [
-    "/bin",
-    "/dist",
-    "/oclif.manifest.json"
-  ],
-  "engines": {
-    "node": ">=20"
-  },
-  "scripts": {
-    "build": "tsc",
-    "test": "mocha --forbid-only \"test/**/*.test.ts\"",
-    "readme": "oclif readme",
-    "lint": "tsc --noEmit"
-  },
-  "oclif": {
-    "bin": "polypot",
-    "dirname": "polypot",
-    "commands": "./dist/commands",
-    "topicSeparator": " ",
-    "helpOptions": {
-      "flagSortOrder": "none"
-    }
-  },
-  "dependencies": {
-    "@inquirer/prompts": "^8.4.2",
-    "@oclif/core": "^4.11.1",
-    "openai": "^6.37.0",
-    "yaml": "^2.8.4",
-    "zod": "^4.4.3"
-  },
-  "devDependencies": {
-    "@oclif/test": "^4",
-    "@types/chai": "^5",
-    "@types/mocha": "^10",
-    "@types/node": "^22",
-    "chai": "^5",
-    "mocha": "^11",
-    "oclif": "^4",
-    "ts-node": "^10.9.2",
-    "typescript": "^5"
-  }
+	"name": "polypot",
+	"version": "0.1.0",
+	"description": "AI-powered translation CLI for .pot files",
+	"license": "MIT",
+	"author": "",
+	"type": "module",
+	"bin": {
+		"polypot": "./bin/run.js"
+	},
+	"main": "dist/index.js",
+	"types": "dist/index.d.ts",
+	"files": [
+		"/bin",
+		"/dist",
+		"/oclif.manifest.json"
+	],
+	"engines": {
+		"node": ">=20"
+	},
+	"scripts": {
+		"build": "tsc",
+		"test": "mocha --forbid-only \"test/**/*.test.ts\"",
+		"readme": "oclif readme",
+		"format": "biome format --write .",
+		"check": "biome check . && npm run typecheck",
+		"check:fix": "biome check --write .",
+		"lint": "biome lint . && npm run typecheck",
+		"lint:fix": "biome lint --write .",
+		"typecheck": "tsc --noEmit"
+	},
+	"oclif": {
+		"bin": "polypot",
+		"dirname": "polypot",
+		"commands": "./dist/commands",
+		"topicSeparator": " ",
+		"helpOptions": {
+			"flagSortOrder": "none"
+		}
+	},
+	"dependencies": {
+		"@inquirer/prompts": "^8.4.2",
+		"@oclif/core": "^4.11.1",
+		"openai": "^6.37.0",
+		"yaml": "^2.8.4",
+		"zod": "^4.4.3"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "2.4.15",
+		"@oclif/test": "^4",
+		"@types/chai": "^5",
+		"@types/mocha": "^10",
+		"@types/node": "^22",
+		"chai": "^5",
+		"mocha": "^11",
+		"oclif": "^4",
+		"ts-node": "^10.9.2",
+		"typescript": "^5"
+	}
 }

@@ -1,27 +1,27 @@
 {
-  "compilerOptions": {
-    "declaration": true,
-    "esModuleInterop": true,
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
-    "outDir": "dist",
-    "rootDir": "src",
-    "incremental": true,
-    "tsBuildInfoFile": "./dist/.tsbuildinfo",
-    "strict": true,
-    "noUncheckedIndexedAccess": true,
-    "noImplicitOverride": true,
-    "exactOptionalPropertyTypes": true,
-    "noPropertyAccessFromIndexSignature": true,
-    "target": "ES2022",
-    "skipLibCheck": true,
-    "resolveJsonModule": true,
-    "lib": ["ES2022"],
-    "types": ["node", "mocha", "chai"]
-  },
-  "include": ["src/**/*"],
-  "ts-node": {
-    "esm": true,
-    "experimentalSpecifierResolution": "node"
-  }
+	"compilerOptions": {
+		"declaration": true,
+		"esModuleInterop": true,
+		"module": "NodeNext",
+		"moduleResolution": "NodeNext",
+		"outDir": "dist",
+		"rootDir": "src",
+		"incremental": true,
+		"tsBuildInfoFile": "./dist/.tsbuildinfo",
+		"strict": true,
+		"noUncheckedIndexedAccess": true,
+		"noImplicitOverride": true,
+		"exactOptionalPropertyTypes": true,
+		"noPropertyAccessFromIndexSignature": true,
+		"target": "ES2022",
+		"skipLibCheck": true,
+		"resolveJsonModule": true,
+		"lib": ["ES2022"],
+		"types": ["node", "mocha", "chai"]
+	},
+	"include": ["src/**/*"],
+	"ts-node": {
+		"esm": true,
+		"experimentalSpecifierResolution": "node"
+	}
 }

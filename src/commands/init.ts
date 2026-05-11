@@ -1,57 +1,68 @@
-import {Command, Flags} from '@oclif/core'
-import path from 'node:path'
-import {resolveConfigPaths} from '../config/paths.js'
-import {polypotEnv, STUB} from '../flag-helpers.js'
+import path from "node:path";
+import { Command, Flags } from "@oclif/core";
+import { resolveConfigPaths } from "../config/paths.js";
+import { polypotEnv, STUB } from "../flag-helpers.js";
 
 export default class Init extends Command {
-  static override summary = 'Initialise polypot configuration in the current project'
-  static override description = `
+	static override summary =
+		"Initialise polypot configuration in the current project";
+	static override description = `
 Scaffolded command for future per-project config creation.
 
 Current release prints the files it would write, but does not create
 .polypot/config.yaml, .polypot/.env, or update .gitignore yet.
-`
-  static override examples = [
-    '<%= config.bin %> <%= command.id %>',
-    '<%= config.bin %> <%= command.id %> --yes',
-    '<%= config.bin %> <%= command.id %> --no-gitignore',
-    '<%= config.bin %> <%= command.id %> --cwd /path/to/project',
-  ]
+`;
+	static override examples = [
+		"<%= config.bin %> <%= command.id %>",
+		"<%= config.bin %> <%= command.id %> --yes",
+		"<%= config.bin %> <%= command.id %> --no-gitignore",
+		"<%= config.bin %> <%= command.id %> --cwd /path/to/project",
+	];
 
-  static override flags = {
-    force: Flags.boolean({
-      char: 'f',
-      summary: 'Overwrite existing .polypot/ files.',
-      env: polypotEnv('force'),
-    }),
-    cwd: Flags.string({
-      summary: 'Target project directory (defaults to the current working directory).',
-      defaultHelp: 'process.cwd()',
-      env: polypotEnv('cwd'),
-    }),
-    gitignore: Flags.boolean({
-      default: true,
-      allowNo: true,
-      helpLabel: '--[no-]gitignore',
-      summary: 'Append .polypot/.env to the project .gitignore (default).',
-      env: polypotEnv('gitignore'),
-    }),
-    yes: Flags.boolean({
-      char: 'y',
-      summary: 'Accept defaults non-interactively.',
-      env: polypotEnv('yes'),
-    }),
-  }
+	static override flags = {
+		force: Flags.boolean({
+			char: "f",
+			summary: "Overwrite existing .polypot/ files.",
+			env: polypotEnv("force"),
+		}),
+		cwd: Flags.string({
+			summary:
+				"Target project directory (defaults to the current working directory).",
+			defaultHelp: "process.cwd()",
+			env: polypotEnv("cwd"),
+		}),
+		gitignore: Flags.boolean({
+			default: true,
+			allowNo: true,
+			helpLabel: "--[no-]gitignore",
+			summary:
+				"Append .polypot/.env to the project .gitignore (default).",
+			env: polypotEnv("gitignore"),
+		}),
+		yes: Flags.boolean({
+			char: "y",
+			summary: "Accept defaults non-interactively.",
+			env: polypotEnv("yes"),
+		}),
+	};
 
-  public async run(): Promise<void> {
-    const {flags} = await this.parse(Init)
-    const targetCwd = flags.cwd ?? process.cwd()
-    const paths = resolveConfigPaths({configDir: this.config.configDir, cwd: targetCwd})
-    const gitignorePath = path.join(targetCwd, '.gitignore')
+	public async run(): Promise<void> {
+		const { flags } = await this.parse(Init);
+		const targetCwd = flags.cwd ?? process.cwd();
+		const paths = resolveConfigPaths({
+			configDir: this.config.configDir,
+			cwd: targetCwd,
+		});
+		const gitignorePath = path.join(targetCwd, ".gitignore");
 
-    this.log(`${STUB} init not implemented. Would write:`)
-    this.log(`  ${paths.projectYaml}${flags.force ? ' (force overwrite)' : ''}`)
-    this.log(`  ${paths.projectEnv}${flags.force ? ' (force overwrite)' : ''}`)
-    if (flags.gitignore) this.log(`  append ".polypot/.env" to ${gitignorePath}`)
-  }
+		this.log(`${STUB} init not implemented. Would write:`);
+		this.log(
+			`  ${paths.projectYaml}${flags.force ? " (force overwrite)" : ""}`,
+		);
+		this.log(
+			`  ${paths.projectEnv}${flags.force ? " (force overwrite)" : ""}`,
+		);
+		if (flags.gitignore)
+			this.log(`  append ".polypot/.env" to ${gitignorePath}`);
+	}
 }
