@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import { configDotenv } from "dotenv";
 import YAML from "yaml";
 import { type ResolveConfigPathsOptions, resolveConfigPaths } from "./paths.js";
 import {
@@ -136,35 +137,23 @@ export async function writeGlobalConfig(
 	}
 }
 
-function parseEnvValue(line: string, key: string): string | undefined {
-	if (!line.startsWith(`${key}=`)) return undefined;
-	const value = line.slice(key.length + 1).trim();
-	if (value.startsWith('"') && value.endsWith('"')) return value.slice(1, -1);
-	if (value.startsWith("'") && value.endsWith("'")) return value.slice(1, -1);
-	return value;
-}
-
-function isEnvKeyLine(line: string, key: string): boolean {
-	return line.trimStart().startsWith(`${key}=`);
-}
-
-function serializeEnvValue(value: string): string {
-	return value.replaceAll("\n", "").replaceAll("\r", "");
-}
-
 export async function readGlobalSecrets(
 	options: ResolveConfigPathsOptions,
 ): Promise<PolypotSecrets> {
 	const paths = resolveConfigPaths(options);
 
 	try {
-		const raw = await readOptionalUtf8File(paths.globalEnv);
-		if (raw === undefined) return EMPTY_SECRETS;
-		const openaiApiKey = raw
-			.split(/\r?\n/)
-			.map((line) => parseEnvValue(line.trim(), "OPENAI_API_KEY"))
-			.find((value) => value !== undefined);
-		return createPolypotSecrets(openaiApiKey);
+		const env: Record<string, string | undefined> = {};
+		const result = configDotenv({
+			path: paths.globalEnv,
+			processEnv: env,
+			quiet: true,
+		});
+		if (result.error !== undefined) {
+			if (isMissingFileError(result.error)) return EMPTY_SECRETS;
+			throw result.error;
+		}
+		return createPolypotSecrets(env["OPENAI_API_KEY"]);
 	} catch (error) {
 		throw new Error(
 			`Failed to read global secrets at ${paths.globalEnv}: ${formatError(error)}`,
@@ -187,9 +176,10 @@ export async function writeGlobalSecrets(
 			.split(/\r?\n/)
 			.filter(
 				(line) =>
-					line.length > 0 && !isEnvKeyLine(line, "OPENAI_API_KEY"),
+					line.trim().length > 0 &&
+					!line.trimStart().startsWith("OPENAI_API_KEY="),
 			);
-		lines.push(`OPENAI_API_KEY=${serializeEnvValue(apiKey)}`);
+		lines.push(`OPENAI_API_KEY=${apiKey.replaceAll(/\r|\n/g, "")}`);
 		await writeRestrictedFile(
 			options.configDir,
 			paths.globalEnv,
