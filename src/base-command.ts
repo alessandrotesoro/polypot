@@ -18,6 +18,12 @@ interface ConfigDiscoveryFlags {
 	readonly "no-env"?: boolean;
 }
 
+/**
+ * Build config lookup options from parsed flags.
+ *
+ * @param flags Parsed command flags.
+ * @returns Config lookup options.
+ */
 function extractDiscoveryOptions(
 	flags: ConfigDiscoveryFlags,
 ): LoadPolypotConfigOptions {
@@ -30,11 +36,17 @@ function extractDiscoveryOptions(
 	};
 }
 
+/**
+ * Command base class that loads Polypot config first.
+ */
 export abstract class BaseCommand<T extends typeof Command> extends Command {
 	protected flags!: BaseFlags<T>;
 	protected args!: BaseArgs<T>;
 	protected appConfig!: PolypotConfig;
 
+	/**
+	 * Parse command input and load app config.
+	 */
 	public override async init(): Promise<void> {
 		await super.init();
 

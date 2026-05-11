@@ -38,6 +38,12 @@ interface PromptCapture {
 	}>;
 }
 
+/**
+ * Run a callback with temporary config paths.
+ *
+ * @param fn Input value.
+ * @returns A promise for the result.
+ */
 async function withTempConfigHome<T>(
 	fn: (configHome: string) => Promise<T>,
 ): Promise<T> {
@@ -58,6 +64,13 @@ async function withTempConfigHome<T>(
 	}
 }
 
+/**
+ * Build a prompt adapter backed by canned answers.
+ *
+ * @param answers Answers collected from setup prompts.
+ * @param capture Input value.
+ * @returns Prompt adapter backed by the supplied answers.
+ */
 function adapterFromAnswers(
 	answers: {
 		readonly checkboxes?: string[][];
@@ -69,6 +82,12 @@ function adapterFromAnswers(
 	capture: PromptCapture = {},
 ): SetupPromptAdapter {
 	return {
+		/**
+		 * Return checked answers for a checkbox prompt.
+		 *
+		 * @param options Options for the operation.
+		 * @returns The result.
+		 */
 		checkbox: async (options) => {
 			capture.checkboxes?.push({
 				choices: options.choices,
@@ -81,11 +100,24 @@ function adapterFromAnswers(
 					.map((choice) => choice.value)
 			);
 		},
+
+		/**
+		 * Return the next canned confirm answer.
+		 *
+		 * @returns The result.
+		 */
 		confirm: async () => {
 			const next = answers.confirms.shift();
 			if (next === undefined) throw new Error("missing confirm answer");
 			return next;
 		},
+
+		/**
+		 * Return the next canned input answer.
+		 *
+		 * @param options Options for the operation.
+		 * @returns The result.
+		 */
 		input: async (options) => {
 			capture.inputs?.push({
 				...(options.default !== undefined && {
@@ -100,6 +132,13 @@ function adapterFromAnswers(
 				throw new Error(String(validation));
 			return next;
 		},
+
+		/**
+		 * Return the next canned password answer.
+		 *
+		 * @param options Options for the operation.
+		 * @returns The result.
+		 */
 		password: async (options) => {
 			const next = answers.passwords.shift();
 			if (next === undefined) throw new Error("missing password answer");
@@ -108,6 +147,13 @@ function adapterFromAnswers(
 				throw new Error(String(validation));
 			return next;
 		},
+
+		/**
+		 * Return the next canned select answer.
+		 *
+		 * @param options Options for the operation.
+		 * @returns The result.
+		 */
 		select: async (options) => {
 			capture.selects?.push({
 				choices: options.choices,

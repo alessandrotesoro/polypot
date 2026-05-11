@@ -9,6 +9,11 @@ import {
 import { resolveConfigPaths } from "../../src/config/paths.js";
 import { DEFAULT_OPENAI_MODEL } from "../../src/config/schema.js";
 
+/**
+ * Create a temporary config directory.
+ *
+ * @returns Path to the temporary config directory.
+ */
 async function tempConfigDir(): Promise<string> {
 	return fs.mkdtemp(path.join(os.tmpdir(), "polypot-loader-"));
 }

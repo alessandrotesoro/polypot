@@ -124,12 +124,24 @@ const languageByValue = new Map(
 	SETUP_LANGUAGES.map((language) => [language.value, language]),
 );
 
+/**
+ * Trim locale values and drop blanks.
+ *
+ * @param values Values to normalize.
+ * @returns Trimmed, non-empty locale values.
+ */
 function normalizedValues(values: readonly string[]): string[] {
 	return values
 		.map((value) => value.trim())
 		.filter((value) => value.length > 0);
 }
 
+/**
+ * Format a locale code for setup prompts.
+ *
+ * @param value Value to parse or format.
+ * @returns Formatted locale label.
+ */
 export function formatSetupLanguage(value: string): string {
 	const language = languageByValue.get(value);
 	return language === undefined
@@ -137,6 +149,12 @@ export function formatSetupLanguage(value: string): string {
 		: `${language.label} (${language.value})`;
 }
 
+/**
+ * Build setup prompt choices for locales.
+ *
+ * @param options Options for the operation.
+ * @returns Choices for the setup prompt.
+ */
 export function setupLanguageChoices(
 	options: { readonly selected?: readonly string[] } = {},
 ): SetupLanguageChoice[] {

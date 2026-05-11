@@ -49,6 +49,13 @@ const defaultPromptAdapter: SetupPromptAdapter = {
 	checkbox,
 	confirm,
 	input,
+
+	/**
+	 * Prompt for a masked password.
+	 *
+	 * @param options Options for the operation.
+	 * @returns The result.
+	 */
 	password: (options) => password({ mask: "*", ...options }),
 	select,
 };
@@ -59,10 +66,20 @@ type SetupPromptGlobal = typeof globalThis & {
 	[SETUP_PROMPT_ADAPTER]?: SetupPromptAdapter;
 };
 
+/**
+ * Read the global storage slot for prompt adapters.
+ *
+ * @returns The typed global prompt adapter store.
+ */
 function setupPromptGlobal(): SetupPromptGlobal {
 	return globalThis as SetupPromptGlobal;
 }
 
+/**
+ * Set or clear the prompt adapter used by tests.
+ *
+ * @param adapter Prompt adapter to use.
+ */
 export function setSetupPromptAdapterForTests(
 	adapter: SetupPromptAdapter | undefined,
 ): void {
@@ -74,10 +91,21 @@ export function setSetupPromptAdapterForTests(
 	}
 }
 
+/**
+ * Return the current prompt adapter.
+ *
+ * @returns The active prompt adapter.
+ */
 function currentPromptAdapter(): SetupPromptAdapter {
 	return setupPromptGlobal()[SETUP_PROMPT_ADAPTER] ?? defaultPromptAdapter;
 }
 
+/**
+ * Parse a setup temperature value.
+ *
+ * @param value Value to parse or format.
+ * @returns Parsed temperature, or undefined when invalid.
+ */
 function parseTemperature(value: string): number | undefined {
 	const parsed = Number(value);
 	if (!Number.isFinite(parsed)) return undefined;
@@ -85,10 +113,24 @@ function parseTemperature(value: string): number | undefined {
 	return parsed;
 }
 
+/**
+ * Add a visible default to prompt text.
+ *
+ * @param message Input value.
+ * @param value Value to parse or format.
+ * @returns Prompt text with the default value appended.
+ */
 function messageWithDefault(message: string, value: string): string {
 	return `${message} (default: ${value})`;
 }
 
+/**
+ * Ask whether to store an OpenAI API key.
+ *
+ * @param existingSecrets Secrets already stored.
+ * @param adapter Prompt adapter to use.
+ * @returns The entered API key, or undefined when skipped.
+ */
 async function promptOpenAIApiKey(
 	existingSecrets: PolypotSecrets,
 	adapter: SetupPromptAdapter,
@@ -107,6 +149,13 @@ async function promptOpenAIApiKey(
 
 	return adapter.password({
 		message: "OpenAI API key",
+
+		/**
+		 * Validate the prompt value.
+		 *
+		 * @param value Value to parse or format.
+		 * @returns The result.
+		 */
 		validate: (value) =>
 			value.trim().length > 0 ||
 			(existingSecrets.hasOpenaiApiKey
@@ -115,6 +164,13 @@ async function promptOpenAIApiKey(
 	});
 }
 
+/**
+ * Apply setup answers to existing config.
+ *
+ * @param existingConfig Config values already stored.
+ * @param answers Answers collected from setup prompts.
+ * @returns Updated Polypot config.
+ */
 export function buildSetupConfig(
 	existingConfig: PolypotConfig,
 	answers: SetupAnswers,
@@ -135,6 +191,14 @@ export function buildSetupConfig(
 	};
 }
 
+/**
+ * Collect setup answers from the prompt adapter.
+ *
+ * @param existingConfig Config values already stored.
+ * @param existingSecrets Secrets already stored.
+ * @param adapter Prompt adapter to use.
+ * @returns Collected setup answers.
+ */
 export async function collectSetupAnswers(
 	existingConfig: PolypotConfig,
 	existingSecrets: PolypotSecrets,
@@ -157,6 +221,13 @@ export async function collectSetupAnswers(
 			existingConfig.provider.model,
 		),
 		default: existingConfig.provider.model,
+
+		/**
+		 * Validate the prompt value.
+		 *
+		 * @param value Value to parse or format.
+		 * @returns The result.
+		 */
 		validate: (value) =>
 			value.trim().length > 0 || "Model cannot be empty.",
 	});
@@ -167,6 +238,13 @@ export async function collectSetupAnswers(
 			String(existingConfig.provider.temperature),
 		),
 		default: String(existingConfig.provider.temperature),
+
+		/**
+		 * Validate the prompt value.
+		 *
+		 * @param value Value to parse or format.
+		 * @returns The result.
+		 */
 		validate: (value) =>
 			parseTemperature(value) !== undefined ||
 			"Enter a number from 0 to 2.",
@@ -215,6 +293,12 @@ export async function collectSetupAnswers(
 	};
 }
 
+/**
+ * Ask whether existing setup files can be changed.
+ *
+ * @param adapter Prompt adapter to use.
+ * @returns True when setup files may be changed.
+ */
 export async function confirmSetupUpdate(
 	adapter: SetupPromptAdapter = currentPromptAdapter(),
 ): Promise<boolean> {

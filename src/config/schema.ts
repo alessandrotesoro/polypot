@@ -1,6 +1,7 @@
-// API keys are intentionally absent from this schema. They flow only through
-// env vars, never through YAML, so they can never appear in a serialised
-// config object.
+/**
+ * API keys stay out of this schema. They flow through env vars, not YAML,
+ * so serialized config cannot contain them.
+ */
 import { z } from "zod";
 
 export const DEFAULT_OPENAI_MODEL = "gpt-5.4-mini";

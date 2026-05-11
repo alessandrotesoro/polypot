@@ -20,6 +20,9 @@ import {
 	confirmSetupUpdate,
 } from "../setup/prompts.js";
 
+/**
+ * Run global setup and config display flows.
+ */
 export default class Setup extends Command {
 	static override summary =
 		"Configure polypot defaults shared across all projects";
@@ -54,6 +57,9 @@ non-secret defaults to the global YAML config.
 		}),
 	};
 
+	/**
+	 * Run the setup command.
+	 */
 	public async run(): Promise<void> {
 		const { flags } = await this.parse(Setup);
 		const storeOptions = {
@@ -130,6 +136,13 @@ non-secret defaults to the global YAML config.
 		);
 	}
 
+	/**
+	 * Read global config, falling back when force allows it.
+	 *
+	 * @param force Whether malformed config may be ignored.
+	 * @param storeOptions Config path options.
+	 * @returns A promise for the result.
+	 */
 	private async readExistingConfig(
 		force: boolean,
 		storeOptions: ResolveConfigPathsOptions,

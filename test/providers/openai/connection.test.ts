@@ -5,14 +5,22 @@ import {
 	validateOpenAIConnection,
 } from "../../../src/providers/openai/connection.js";
 
+/**
+ * Build a mock OpenAI models client.
+ *
+ * @param list Models list implementation.
+ * @returns Mock OpenAI models client.
+ */
 const clientThat = (list: () => Promise<unknown>): OpenAIModelsClient => ({
 	models: { list },
 });
 
 describe("validateOpenAIConnection", () => {
 	it("returns success when OpenAI accepts the key", async () => {
-		const result = await validateOpenAIConnection("sk-test", () =>
-			clientThat(async () => ({ data: [] })),
+		const result = await validateOpenAIConnection(
+			"sk-test",
+
+			() => clientThat(async () => ({ data: [] })),
 		);
 
 		expect(result.ok).to.equal(true);
@@ -21,10 +29,14 @@ describe("validateOpenAIConnection", () => {
 	it("rejects blank keys before calling OpenAI", async () => {
 		let called = false;
 
-		const result = await validateOpenAIConnection("   ", () => {
-			called = true;
-			return clientThat(async () => ({ data: [] }));
-		});
+		const result = await validateOpenAIConnection(
+			"   ",
+
+			() => {
+				called = true;
+				return clientThat(async () => ({ data: [] }));
+			},
+		);
 
 		expect(result).to.deep.equal({
 			ok: false,
@@ -43,10 +55,13 @@ describe("validateOpenAIConnection", () => {
 			new Headers(),
 		);
 
-		const result = await validateOpenAIConnection(secret, () =>
-			clientThat(async () => {
-				throw error;
-			}),
+		const result = await validateOpenAIConnection(
+			secret,
+
+			() =>
+				clientThat(async () => {
+					throw error;
+				}),
 		);
 
 		expect(result.ok).to.equal(false);
@@ -57,10 +72,15 @@ describe("validateOpenAIConnection", () => {
 	});
 
 	it("returns a network failure without crashing", async () => {
-		const result = await validateOpenAIConnection("sk-test", () =>
-			clientThat(async () => {
-				throw new APIConnectionError({ message: "socket closed" });
-			}),
+		const result = await validateOpenAIConnection(
+			"sk-test",
+
+			() =>
+				clientThat(async () => {
+					throw new APIConnectionError({
+						message: "socket closed",
+					});
+				}),
 		);
 
 		expect(result.ok).to.equal(false);
@@ -70,10 +90,13 @@ describe("validateOpenAIConnection", () => {
 	it("returns an unknown failure for unexpected errors without leaking the key", async () => {
 		const secret = "sk-test-secret";
 
-		const result = await validateOpenAIConnection(secret, () =>
-			clientThat(async () => {
-				throw new Error(`bad key ${secret}`);
-			}),
+		const result = await validateOpenAIConnection(
+			secret,
+
+			() =>
+				clientThat(async () => {
+					throw new Error(`bad key ${secret}`);
+				}),
 		);
 
 		expect(result.ok).to.equal(false);

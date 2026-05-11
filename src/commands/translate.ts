@@ -3,6 +3,9 @@ import { BaseCommand } from "../base-command.js";
 import { DEFAULT_OPENAI_MODEL } from "../config/schema.js";
 import { polypotEnv, STUB } from "../flag-helpers.js";
 
+/**
+ * Print translate inputs until translation is implemented.
+ */
 export default class Translate extends BaseCommand<typeof Translate> {
 	static override summary =
 		"Translate a .pot file into one or more languages using AI";
@@ -236,6 +239,11 @@ each target language.
 		}),
 	};
 
+	/**
+	 * Run the translate command.
+	 *
+	 * @returns A promise for the result.
+	 */
 	public async run(): Promise<unknown> {
 		const result = {
 			stub: `${STUB} translate not implemented`,

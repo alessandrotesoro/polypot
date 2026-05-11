@@ -3,11 +3,24 @@ import { expect } from "chai";
 import { BaseCommand } from "../src/base-command.js";
 import type { PolypotConfig } from "../src/config/schema.js";
 
+/**
+ * Test command that exposes loaded app config.
+ */
 class Probe extends BaseCommand<typeof Probe> {
 	static override flags = {};
+
+	/**
+	 * Return the loaded app config.
+	 *
+	 * @returns The loaded app config.
+	 */
 	public getAppConfig(): PolypotConfig {
 		return this.appConfig;
 	}
+
+	/**
+	 * Run the probe command.
+	 */
 	async run(): Promise<void> {}
 }
 

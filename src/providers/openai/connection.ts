@@ -27,6 +27,12 @@ export type OpenAIClientFactory = (apiKey: string) => OpenAIModelsClient;
 
 export const SETUP_OPENAI_VALIDATION_TIMEOUT_MS = 10_000;
 
+/**
+ * Create an OpenAI client for setup validation.
+ *
+ * @param apiKey OpenAI API key.
+ * @returns OpenAI client wrapper used by validation.
+ */
 const defaultClientFactory: OpenAIClientFactory = (apiKey) =>
 	new OpenAI({
 		apiKey,
@@ -34,6 +40,12 @@ const defaultClientFactory: OpenAIClientFactory = (apiKey) =>
 		timeout: SETUP_OPENAI_VALIDATION_TIMEOUT_MS,
 	});
 
+/**
+ * Convert OpenAI errors into setup validation results.
+ *
+ * @param error Error to inspect.
+ * @returns A validation result for the error.
+ */
 function classifyOpenAIError(error: unknown): OpenAIConnectionResult {
 	if (
 		error instanceof APIError &&
@@ -64,6 +76,13 @@ function classifyOpenAIError(error: unknown): OpenAIConnectionResult {
 	};
 }
 
+/**
+ * Check an OpenAI key by listing models.
+ *
+ * @param apiKey OpenAI API key.
+ * @param createClient Factory used to create the OpenAI client.
+ * @returns Validation result for the API key.
+ */
 export async function validateOpenAIConnection(
 	apiKey: string,
 	createClient: OpenAIClientFactory = defaultClientFactory,

@@ -17,6 +17,12 @@ const DIRECTORY_MODE = 0o700;
 const CONFIG_FILE_MODE = 0o600;
 const ENV_FILE_MODE = 0o600;
 
+/**
+ * Check whether an error means a path is missing.
+ *
+ * @param error Error to inspect.
+ * @returns True when the error is a missing path error.
+ */
 function isMissingFileError(error: unknown): boolean {
 	return (
 		error instanceof Error &&
@@ -25,6 +31,12 @@ function isMissingFileError(error: unknown): boolean {
 	);
 }
 
+/**
+ * Check whether a path can be accessed.
+ *
+ * @param path File path to check or write.
+ * @returns True when the path is accessible.
+ */
 async function pathExists(path: string): Promise<boolean> {
 	try {
 		await fs.access(path);
@@ -35,6 +47,12 @@ async function pathExists(path: string): Promise<boolean> {
 	}
 }
 
+/**
+ * Read a UTF-8 file when it exists.
+ *
+ * @param path File path to check or write.
+ * @returns File contents, or undefined when the path is missing.
+ */
 async function readOptionalUtf8File(path: string): Promise<string | undefined> {
 	try {
 		return await fs.readFile(path, "utf8");
@@ -44,11 +62,24 @@ async function readOptionalUtf8File(path: string): Promise<string | undefined> {
 	}
 }
 
+/**
+ * Create the config directory with private permissions.
+ *
+ * @param configDir Directory that stores config files.
+ */
 async function ensureConfigDir(configDir: string): Promise<void> {
 	await fs.mkdir(configDir, { recursive: true, mode: DIRECTORY_MODE });
 	await fs.chmod(configDir, DIRECTORY_MODE).catch(() => {});
 }
 
+/**
+ * Write a private config or secret file.
+ *
+ * @param configDir Directory that stores config files.
+ * @param path File path to check or write.
+ * @param contents File contents to write.
+ * @param mode POSIX file mode to apply.
+ */
 async function writeRestrictedFile(
 	configDir: string,
 	path: string,
@@ -60,14 +91,32 @@ async function writeRestrictedFile(
 	await fs.chmod(path, mode).catch(() => {});
 }
 
+/**
+ * Convert an unknown error to text.
+ *
+ * @param error Error to inspect.
+ * @returns A readable error message.
+ */
 function formatError(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
 }
 
+/**
+ * Parse YAML into Polypot config.
+ *
+ * @param raw Raw YAML text.
+ * @returns Parsed Polypot config.
+ */
 function parsePolypotConfig(raw: string): PolypotConfig {
 	return PolypotConfigSchema.parse(YAML.parse(raw) ?? {});
 }
 
+/**
+ * Read config from an explicit path.
+ *
+ * @param configPath Config file path.
+ * @returns Parsed config from the file.
+ */
 export async function readPolypotConfigFile(
 	configPath: string,
 ): Promise<PolypotConfig> {
@@ -80,6 +129,12 @@ export async function readPolypotConfigFile(
 	}
 }
 
+/**
+ * Read global config and report whether the file exists.
+ *
+ * @param options Options for the operation.
+ * @returns Global config and existence state.
+ */
 export async function readGlobalConfigStatus(
 	options: ResolveConfigPathsOptions,
 ): Promise<{ readonly config: PolypotConfig; readonly exists: boolean }> {
@@ -97,12 +152,24 @@ export async function readGlobalConfigStatus(
 	}
 }
 
+/**
+ * Read global config, using defaults when it is missing.
+ *
+ * @param options Options for the operation.
+ * @returns Global config with defaults applied.
+ */
 export async function readGlobalConfig(
 	options: ResolveConfigPathsOptions,
 ): Promise<PolypotConfig> {
 	return (await readGlobalConfigStatus(options)).config;
 }
 
+/**
+ * Check whether any global config files exist.
+ *
+ * @param options Options for the operation.
+ * @returns True when a global config or env file exists.
+ */
 export async function hasGlobalStoreFiles(
 	options: ResolveConfigPathsOptions,
 ): Promise<boolean> {
@@ -114,6 +181,11 @@ export async function hasGlobalStoreFiles(
 	return hasConfig || hasSecrets;
 }
 
+/**
+ * Write validated global config to YAML.
+ *
+ * @param options Options for the operation.
+ */
 export async function writeGlobalConfig(
 	options: ResolveConfigPathsOptions & {
 		readonly config: PolypotConfigInput;
@@ -137,6 +209,12 @@ export async function writeGlobalConfig(
 	}
 }
 
+/**
+ * Read secrets from the global env file.
+ *
+ * @param options Options for the operation.
+ * @returns Secrets loaded from the global env file.
+ */
 export async function readGlobalSecrets(
 	options: ResolveConfigPathsOptions,
 ): Promise<PolypotSecrets> {
@@ -161,6 +239,11 @@ export async function readGlobalSecrets(
 	}
 }
 
+/**
+ * Write the OpenAI API key to the global env file.
+ *
+ * @param options Options for the operation.
+ */
 export async function writeGlobalSecrets(
 	options: ResolveConfigPathsOptions & {
 		readonly secrets: Pick<PolypotSecrets, "openaiApiKey">;

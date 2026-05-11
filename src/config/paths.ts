@@ -12,6 +12,12 @@ export interface ResolveConfigPathsOptions {
 	readonly cwd: string;
 }
 
+/**
+ * Build global and project config paths.
+ *
+ * @param options Options for the operation.
+ * @returns Resolved config paths.
+ */
 export function resolveConfigPaths({
 	configDir,
 	cwd,

@@ -13,6 +13,11 @@ import {
 	DEFAULT_SOURCE_LANGUAGE,
 } from "../../src/config/schema.js";
 
+/**
+ * Create a temporary config directory.
+ *
+ * @returns Path to the temporary config directory.
+ */
 async function tempConfigDir(): Promise<string> {
 	return fs.mkdtemp(path.join(os.tmpdir(), "polypot-global-store-"));
 }

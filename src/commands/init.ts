@@ -3,6 +3,9 @@ import { Command, Flags } from "@oclif/core";
 import { resolveConfigPaths } from "../config/paths.js";
 import { polypotEnv, STUB } from "../flag-helpers.js";
 
+/**
+ * Print the project config files this command would create.
+ */
 export default class Init extends Command {
 	static override summary =
 		"Initialise polypot configuration in the current project";
@@ -46,6 +49,9 @@ Current release prints the files it would write, but does not create
 		}),
 	};
 
+	/**
+	 * Run the init command.
+	 */
 	public async run(): Promise<void> {
 		const { flags } = await this.parse(Init);
 		const targetCwd = flags.cwd ?? process.cwd();
