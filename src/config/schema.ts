@@ -3,15 +3,18 @@
 // config object.
 import {z} from 'zod'
 
+export const DEFAULT_OPENAI_MODEL = 'gpt-5.4-mini'
+export const DEFAULT_SOURCE_LANGUAGE = 'en_US'
+
 const ProviderConfig = z.object({
   provider: z.string().default('openai'),
-  model: z.string().default('gpt-4.1-mini'),
+  model: z.string().default(DEFAULT_OPENAI_MODEL),
   temperature: z.number().default(0.7),
   maxTokens: z.number().int().optional(),
 })
 
 const SourceConfig = z.object({
-  sourceLanguage: z.string().default('en'),
+  sourceLanguage: z.string().default(DEFAULT_SOURCE_LANGUAGE),
   targetLanguages: z.array(z.string()).default([]),
   potFilePath: z.string().optional(),
   inputPoPath: z.string().optional(),

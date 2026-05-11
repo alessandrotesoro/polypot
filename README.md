@@ -145,7 +145,7 @@ PERFORMANCE FLAGS
 
 PROVIDER FLAGS
   -k, --api-key=<value>          Provider API key.
-  -m, --model=<value>            [env: POLYPOT_MODEL] AI model name (e.g. gpt-4.1-mini).
+  -m, --model=<value>            [env: POLYPOT_MODEL] AI model name (e.g. gpt-5.4-mini).
   -s, --source-language=<value>  [env: POLYPOT_SOURCE_LANGUAGE] Source language code.
       --max-tokens=<value>       [env: POLYPOT_MAX_TOKENS] Max completion tokens (1–32768).
       --provider=<value>         [env: POLYPOT_PROVIDER] AI provider (e.g. openai, gemini, anthropic).

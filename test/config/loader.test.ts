@@ -4,6 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import {loadPolypotConfig, loadPolypotRuntimeConfig} from '../../src/config/loader.js'
 import {resolveConfigPaths} from '../../src/config/paths.js'
+import {DEFAULT_OPENAI_MODEL} from '../../src/config/schema.js'
 
 async function tempConfigDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'polypot-loader-'))
@@ -36,7 +37,7 @@ describe('loadPolypotConfig', () => {
     const withoutConfig = await loadPolypotRuntimeConfig({configDir, cwd: configDir, options: {noConfig: true}})
     const withoutEnv = await loadPolypotRuntimeConfig({configDir, cwd: configDir, options: {noEnv: true}})
 
-    expect(withoutConfig.config.provider.model).to.equal('gpt-4.1-mini')
+    expect(withoutConfig.config.provider.model).to.equal(DEFAULT_OPENAI_MODEL)
     expect(withoutConfig.secrets.openaiApiKey).to.equal('sk-test-secret')
     expect(withoutEnv.config.provider.model).to.equal('custom-model')
     expect(withoutEnv.secrets.hasOpenaiApiKey).to.equal(false)

@@ -5,13 +5,30 @@ import os from 'node:os'
 import path from 'node:path'
 import {readGlobalConfig, readGlobalSecrets, writeGlobalConfig, writeGlobalSecrets} from '../../src/config/global-store.js'
 import {loadPolypotRuntimeConfig} from '../../src/config/loader.js'
+import {DEFAULT_OPENAI_MODEL, DEFAULT_SOURCE_LANGUAGE} from '../../src/config/schema.js'
 import {
   buildSetupConfig,
   collectSetupAnswers,
-  parseTargetLanguages,
   setSetupPromptAdapterForTests,
   type SetupPromptAdapter,
 } from '../../src/setup/prompts.js'
+import type {SetupLanguageChoice} from '../../src/setup/languages.js'
+
+interface PromptCapture {
+  readonly checkboxes?: Array<{
+    readonly choices: readonly SetupLanguageChoice[]
+    readonly message: string
+  }>
+  readonly inputs?: Array<{
+    readonly default?: string
+    readonly message: string
+  }>
+  readonly selects?: Array<{
+    readonly choices: readonly SetupLanguageChoice[]
+    readonly default?: string
+    readonly message: string
+  }>
+}
 
 async function withTempConfigHome<T>(fn: (configHome: string) => Promise<T>): Promise<T> {
   const previous = process.env['XDG_CONFIG_HOME']
@@ -29,15 +46,35 @@ async function withTempConfigHome<T>(fn: (configHome: string) => Promise<T>): Pr
   }
 }
 
-function adapterFromAnswers(answers: {readonly confirms: boolean[]; readonly inputs: string[]; readonly passwords: string[]}): SetupPromptAdapter {
+function adapterFromAnswers(
+  answers: {
+    readonly checkboxes?: string[][]
+    readonly confirms: boolean[]
+    readonly inputs: string[]
+    readonly passwords: string[]
+    readonly selects?: string[]
+  },
+  capture: PromptCapture = {},
+): SetupPromptAdapter {
   return {
+    checkbox: async (options) => {
+      capture.checkboxes?.push({
+        choices: options.choices,
+        message: options.message,
+      })
+      return answers.checkboxes?.shift() ?? options.choices.filter((choice) => choice.checked).map((choice) => choice.value)
+    },
     confirm: async () => {
       const next = answers.confirms.shift()
       if (next === undefined) throw new Error('missing confirm answer')
       return next
     },
     input: async (options) => {
-      const next = answers.inputs.shift()
+      capture.inputs?.push({
+        ...(options.default !== undefined && {default: options.default}),
+        message: options.message,
+      })
+      const next = answers.inputs.shift() ?? options.default
       if (next === undefined) throw new Error('missing input answer')
       const validation = options.validate?.(next)
       if (validation !== undefined && validation !== true) throw new Error(String(validation))
@@ -48,6 +85,16 @@ function adapterFromAnswers(answers: {readonly confirms: boolean[]; readonly inp
       if (next === undefined) throw new Error('missing password answer')
       const validation = options.validate?.(next)
       if (validation !== undefined && validation !== true) throw new Error(String(validation))
+      return next
+    },
+    select: async (options) => {
+      capture.selects?.push({
+        choices: options.choices,
+        ...(options.default !== undefined && {default: options.default}),
+        message: options.message,
+      })
+      const next = answers.selects?.shift() ?? options.default
+      if (next === undefined) throw new Error('missing select answer')
       return next
     },
   }
@@ -108,7 +155,9 @@ describe('polypot setup', () => {
       setSetupPromptAdapterForTests(adapterFromAnswers({
         confirms: [true, false],
         passwords: ['sk-command-secret'],
-        inputs: ['gpt-4.1-mini', '0.2', 'en', 'fr_FR, es_ES'],
+        inputs: [DEFAULT_OPENAI_MODEL, '0.2'],
+        selects: [DEFAULT_SOURCE_LANGUAGE],
+        checkboxes: [['fr_FR', 'es_ES']],
       }))
 
       const {stdout, error} = await runCommand(['setup'])
@@ -119,6 +168,8 @@ describe('polypot setup', () => {
       expect(stdout).to.include('Global Polypot setup saved.')
       expect(stdout).to.include('OPENAI_API_KEY: present')
       expect(stdout).to.not.include('sk-command-secret')
+      expect(runtime.config.provider.model).to.equal(DEFAULT_OPENAI_MODEL)
+      expect(runtime.config.source.sourceLanguage).to.equal(DEFAULT_SOURCE_LANGUAGE)
       expect(runtime.config.provider.temperature).to.equal(0.2)
       expect(runtime.config.source.targetLanguages).to.deep.equal(['fr_FR', 'es_ES'])
       expect(runtime.secrets.openaiApiKey).to.equal('sk-command-secret')
@@ -165,7 +216,9 @@ describe('polypot setup', () => {
       setSetupPromptAdapterForTests(adapterFromAnswers({
         confirms: [true],
         passwords: [],
-        inputs: ['new-model', '0.1', 'en', 'de_DE'],
+        inputs: ['new-model', '0.1'],
+        selects: [DEFAULT_SOURCE_LANGUAGE],
+        checkboxes: [['de_DE']],
       }))
 
       const {error} = await runCommand(['setup', '--force'])
@@ -175,6 +228,7 @@ describe('polypot setup', () => {
       expect(error).to.equal(undefined)
       expect(config.provider.model).to.equal('new-model')
       expect(config.provider.temperature).to.equal(0.1)
+      expect(config.source.sourceLanguage).to.equal(DEFAULT_SOURCE_LANGUAGE)
       expect(config.source.targetLanguages).to.deep.equal(['de_DE'])
       expect(secrets.openaiApiKey).to.equal('sk-existing-secret')
     })
@@ -189,7 +243,9 @@ describe('polypot setup', () => {
       setSetupPromptAdapterForTests(adapterFromAnswers({
         confirms: [false],
         passwords: [],
-        inputs: ['fresh-model', '0.3', 'en', 'it_IT'],
+        inputs: ['fresh-model', '0.3'],
+        selects: [DEFAULT_SOURCE_LANGUAGE],
+        checkboxes: [['it_IT']],
       }))
 
       const {error} = await runCommand(['setup', '--force'])
@@ -198,6 +254,7 @@ describe('polypot setup', () => {
       expect(error).to.equal(undefined)
       expect(config.provider.model).to.equal('fresh-model')
       expect(config.provider.temperature).to.equal(0.3)
+      expect(config.source.sourceLanguage).to.equal(DEFAULT_SOURCE_LANGUAGE)
       expect(config.source.targetLanguages).to.deep.equal(['it_IT'])
     })
   })
@@ -209,7 +266,9 @@ describe('polypot setup', () => {
     const answers = await collectSetupAnswers(existingConfig, existingSecrets, adapterFromAnswers({
       confirms: [true, false],
       passwords: ['sk-test-secret'],
-      inputs: ['gpt-4.1-mini', '0.2', 'en', 'fr_FR, es_ES'],
+      inputs: [DEFAULT_OPENAI_MODEL, '0.2'],
+      selects: [DEFAULT_SOURCE_LANGUAGE],
+      checkboxes: [['fr_FR', 'es_ES']],
     }))
 
     await fs.mkdir(configDir, {recursive: true})
@@ -223,11 +282,49 @@ describe('polypot setup', () => {
     const secrets = await readGlobalSecrets({configDir, cwd: process.cwd()})
 
     expect(config.provider.temperature).to.equal(0.2)
+    expect(config.provider.model).to.equal(DEFAULT_OPENAI_MODEL)
+    expect(config.source.sourceLanguage).to.equal(DEFAULT_SOURCE_LANGUAGE)
     expect(config.source.targetLanguages).to.deep.equal(['fr_FR', 'es_ES'])
     expect(secrets.openaiApiKey).to.equal('sk-test-secret')
   })
 
-  it('parses comma-separated target languages', () => {
-    expect(parseTargetLanguages('fr_FR, es_ES,, de_DE ')).to.deep.equal(['fr_FR', 'es_ES', 'de_DE'])
+  it('passes visible defaults and locale-code choices to setup prompts', async () => {
+    const capture: Required<PromptCapture> = {checkboxes: [], inputs: [], selects: []}
+    const configDir = await fs.mkdtemp(path.join(os.tmpdir(), 'polypot-setup-defaults-'))
+    await writeGlobalConfig({
+      configDir,
+      cwd: process.cwd(),
+      config: {
+        provider: {provider: 'openai', model: 'existing-model', temperature: 0.4},
+        source: {sourceLanguage: 'it_IT', targetLanguages: ['fr_FR', 'custom_XY']},
+      },
+    })
+
+    const existingConfig = await readGlobalConfig({configDir, cwd: process.cwd()})
+    const existingSecrets = await readGlobalSecrets({configDir, cwd: process.cwd()})
+    const answers = await collectSetupAnswers(existingConfig, existingSecrets, adapterFromAnswers({
+      confirms: [false],
+      passwords: [],
+      inputs: [],
+      selects: [],
+      checkboxes: [],
+    }, capture))
+
+    expect(capture.inputs[0]).to.deep.include({
+      default: 'existing-model',
+      message: 'Default OpenAI model (default: existing-model)',
+    })
+    expect(capture.inputs[1]).to.deep.include({
+      default: '0.4',
+      message: 'Default temperature (default: 0.4)',
+    })
+    expect(capture.selects[0]?.default).to.equal('it_IT')
+    expect(capture.selects[0]?.message).to.include('Italian (it_IT)')
+    expect(capture.selects[0]?.choices.some((choice) => choice.value === 'it_IT')).to.equal(true)
+    expect(capture.checkboxes[0]?.message).to.include('French (France) (fr_FR)')
+    expect(capture.checkboxes[0]?.choices.find((choice) => choice.value === 'fr_FR')?.checked).to.equal(true)
+    expect(capture.checkboxes[0]?.choices.find((choice) => choice.value === 'custom_XY')?.checked).to.equal(true)
+    expect(answers.sourceLanguage).to.equal('it_IT')
+    expect(answers.targetLanguages).to.deep.equal(['fr_FR', 'custom_XY'])
   })
 })

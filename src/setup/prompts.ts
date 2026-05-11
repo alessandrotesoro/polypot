@@ -1,6 +1,7 @@
-import {confirm, input, password} from '@inquirer/prompts'
+import {checkbox, confirm, input, password, select} from '@inquirer/prompts'
 import type {PolypotConfig} from '../config/schema.js'
 import type {PolypotSecrets} from '../config/secrets.js'
+import {formatSetupLanguage, setupLanguageChoices, type SetupLanguageChoice} from './languages.js'
 
 export interface SetupAnswers {
   readonly openaiApiKey?: string
@@ -14,6 +15,12 @@ export interface SetupAnswers {
 
 export interface SetupPromptAdapter {
   readonly confirm: (options: {readonly message: string; readonly default?: boolean}) => Promise<boolean>
+  readonly checkbox: (options: {
+    readonly message: string
+    readonly choices: readonly SetupLanguageChoice[]
+    readonly pageSize?: number
+    readonly required?: boolean
+  }) => Promise<string[]>
   readonly input: (options: {
     readonly message: string
     readonly default?: string
@@ -23,12 +30,20 @@ export interface SetupPromptAdapter {
     readonly message: string
     readonly validate?: (value: string) => boolean | string
   }) => Promise<string>
+  readonly select: (options: {
+    readonly message: string
+    readonly choices: readonly SetupLanguageChoice[]
+    readonly default?: string
+    readonly pageSize?: number
+  }) => Promise<string>
 }
 
 const defaultPromptAdapter: SetupPromptAdapter = {
-  confirm: (options) => confirm(options),
-  input: (options) => input(options),
+  checkbox,
+  confirm,
+  input,
   password: (options) => password({mask: '*', ...options}),
+  select,
 }
 
 const SETUP_PROMPT_ADAPTER = Symbol.for('polypot.setupPromptAdapter')
@@ -54,18 +69,15 @@ function currentPromptAdapter(): SetupPromptAdapter {
   return setupPromptGlobal()[SETUP_PROMPT_ADAPTER] ?? defaultPromptAdapter
 }
 
-export function parseTargetLanguages(value: string): string[] {
-  return value
-    .split(',')
-    .map((language) => language.trim())
-    .filter((language) => language.length > 0)
-}
-
 function parseTemperature(value: string): number | undefined {
   const parsed = Number(value)
   if (!Number.isFinite(parsed)) return undefined
   if (parsed < 0 || parsed > 2) return undefined
   return parsed
+}
+
+function messageWithDefault(message: string, value: string): string {
+  return `${message} (default: ${value})`
 }
 
 async function promptOpenAIApiKey(
@@ -74,11 +86,11 @@ async function promptOpenAIApiKey(
 ): Promise<string | undefined> {
   const shouldPromptForKey = existingSecrets.hasOpenaiApiKey ?
     !(await adapter.confirm({
-      message: 'Keep existing OpenAI API key?',
+      message: 'Keep existing OpenAI API key? (default: yes)',
       default: true,
     })) :
     await adapter.confirm({
-      message: 'Store an OpenAI API key now?',
+      message: 'Store an OpenAI API key now? (default: yes)',
       default: true,
     })
 
@@ -120,31 +132,39 @@ export async function collectSetupAnswers(
   const validateConnection = openaiApiKey === undefined ?
     false :
     await adapter.confirm({
-      message: 'Validate the OpenAI connection now?',
+      message: 'Validate the OpenAI connection now? (default: yes)',
       default: true,
     })
 
   const model = await adapter.input({
-    message: 'Default OpenAI model',
+    message: messageWithDefault('Default OpenAI model', existingConfig.provider.model),
     default: existingConfig.provider.model,
     validate: (value) => value.trim().length > 0 || 'Model cannot be empty.',
   })
 
   const temperatureAnswer = await adapter.input({
-    message: 'Default temperature',
+    message: messageWithDefault('Default temperature', String(existingConfig.provider.temperature)),
     default: String(existingConfig.provider.temperature),
     validate: (value) => parseTemperature(value) !== undefined || 'Enter a number from 0 to 2.',
   })
 
-  const sourceLanguage = await adapter.input({
-    message: 'Default source language',
+  const sourceLanguage = await adapter.select({
+    choices: setupLanguageChoices({selected: [existingConfig.source.sourceLanguage]}),
     default: existingConfig.source.sourceLanguage,
-    validate: (value) => value.trim().length > 0 || 'Source language cannot be empty.',
+    message: messageWithDefault('Default source language', formatSetupLanguage(existingConfig.source.sourceLanguage)),
+    pageSize: 12,
   })
 
-  const targetLanguages = await adapter.input({
-    message: 'Default target languages (comma-separated, optional)',
-    default: existingConfig.source.targetLanguages.join(','),
+  const targetLanguages = await adapter.checkbox({
+    choices: setupLanguageChoices({selected: existingConfig.source.targetLanguages}),
+    message: messageWithDefault(
+      'Default target languages',
+      existingConfig.source.targetLanguages.length > 0 ?
+        existingConfig.source.targetLanguages.map(formatSetupLanguage).join(', ') :
+        'none',
+    ),
+    pageSize: 12,
+    required: false,
   })
 
   return {
@@ -153,14 +173,14 @@ export async function collectSetupAnswers(
     provider: 'openai',
     model: model.trim(),
     temperature: parseTemperature(temperatureAnswer) ?? existingConfig.provider.temperature,
-    sourceLanguage: sourceLanguage.trim(),
-    targetLanguages: parseTargetLanguages(targetLanguages),
+    sourceLanguage,
+    targetLanguages,
   }
 }
 
 export async function confirmSetupUpdate(adapter: SetupPromptAdapter = currentPromptAdapter()): Promise<boolean> {
   return adapter.confirm({
-    message: 'Update existing global Polypot setup?',
+    message: 'Update existing global Polypot setup? (default: no)',
     default: false,
   })
 }

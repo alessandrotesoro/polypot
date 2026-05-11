@@ -1,5 +1,6 @@
 import {Flags} from '@oclif/core'
 import {BaseCommand} from '../base-command.js'
+import {DEFAULT_OPENAI_MODEL} from '../config/schema.js'
 import {polypotEnv, STUB} from '../flag-helpers.js'
 
 export default class Translate extends BaseCommand<typeof Translate> {
@@ -29,7 +30,7 @@ each target language.
     }),
     model: Flags.string({
       char: 'm',
-      summary: 'AI model name (e.g. gpt-4.1-mini).',
+      summary: `AI model name (e.g. ${DEFAULT_OPENAI_MODEL}).`,
       env: polypotEnv('model'),
       helpGroup: 'PROVIDER',
     }),

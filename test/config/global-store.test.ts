@@ -3,6 +3,7 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import {readGlobalConfig, readGlobalSecrets, writeGlobalConfig, writeGlobalSecrets} from '../../src/config/global-store.js'
+import {DEFAULT_OPENAI_MODEL, DEFAULT_SOURCE_LANGUAGE} from '../../src/config/schema.js'
 
 async function tempConfigDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'polypot-global-store-'))
@@ -15,7 +16,8 @@ describe('global config store', () => {
     const secrets = await readGlobalSecrets({configDir, cwd: configDir})
 
     expect(config.provider.provider).to.equal('openai')
-    expect(config.provider.model).to.equal('gpt-4.1-mini')
+    expect(config.provider.model).to.equal(DEFAULT_OPENAI_MODEL)
+    expect(config.source.sourceLanguage).to.equal(DEFAULT_SOURCE_LANGUAGE)
     expect(secrets.openaiApiKey).to.equal(undefined)
     expect(secrets.hasOpenaiApiKey).to.equal(false)
   })
@@ -27,8 +29,8 @@ describe('global config store', () => {
       configDir,
       cwd: configDir,
       config: {
-        provider: {provider: 'openai', model: 'gpt-4.1-mini', temperature: 0.2},
-        source: {sourceLanguage: 'en', targetLanguages: ['fr_FR', 'es_ES']},
+        provider: {provider: 'openai', model: DEFAULT_OPENAI_MODEL, temperature: 0.2},
+        source: {sourceLanguage: DEFAULT_SOURCE_LANGUAGE, targetLanguages: ['fr_FR', 'es_ES']},
       },
     })
 
