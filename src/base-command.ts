@@ -1,9 +1,10 @@
 import { Command, type Interfaces } from "@oclif/core";
 import {
 	type LoadPolypotConfigOptions,
-	loadPolypotConfig,
+	loadPolypotRuntimeConfig,
 } from "./config/loader.js";
 import type { PolypotConfig } from "./config/schema.js";
+import type { PolypotSecrets } from "./config/secrets.js";
 
 export type BaseFlags<T extends typeof Command> = Interfaces.InferredFlags<
 	T["flags"]
@@ -43,9 +44,10 @@ export abstract class BaseCommand<T extends typeof Command> extends Command {
 	protected flags!: BaseFlags<T>;
 	protected args!: BaseArgs<T>;
 	protected appConfig!: PolypotConfig;
+	protected runtimeSecrets!: PolypotSecrets;
 
 	/**
-	 * Parse command input and load app config.
+	 * Parse command input and load runtime config.
 	 */
 	public override async init(): Promise<void> {
 		await super.init();
@@ -59,10 +61,12 @@ export abstract class BaseCommand<T extends typeof Command> extends Command {
 		this.flags = flags as BaseFlags<T>;
 		this.args = args as BaseArgs<T>;
 
-		this.appConfig = await loadPolypotConfig({
+		const runtimeConfig = await loadPolypotRuntimeConfig({
 			configDir: this.config.configDir,
 			cwd: process.cwd(),
 			options: extractDiscoveryOptions(flags as ConfigDiscoveryFlags),
 		});
+		this.appConfig = runtimeConfig.config;
+		this.runtimeSecrets = runtimeConfig.secrets;
 	}
 }

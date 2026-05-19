@@ -8,35 +8,21 @@ import {
 	readGlobalSecrets,
 	writeGlobalConfig,
 	writeGlobalSecrets,
-} from "../../src/config/global-store.js";
+} from "../../src/config/store.js";
 import { loadPolypotRuntimeConfig } from "../../src/config/loader.js";
 import {
 	DEFAULT_OPENAI_MODEL,
 	DEFAULT_SOURCE_LANGUAGE,
 } from "../../src/config/schema.js";
-import type { SetupLanguageChoice } from "../../src/setup/languages.js";
 import {
 	buildSetupConfig,
 	collectSetupAnswers,
-	type SetupPromptAdapter,
 	setSetupPromptAdapterForTests,
 } from "../../src/setup/prompts.js";
-
-interface PromptCapture {
-	readonly checkboxes?: Array<{
-		readonly choices: readonly SetupLanguageChoice[];
-		readonly message: string;
-	}>;
-	readonly inputs?: Array<{
-		readonly default?: string;
-		readonly message: string;
-	}>;
-	readonly selects?: Array<{
-		readonly choices: readonly SetupLanguageChoice[];
-		readonly default?: string;
-		readonly message: string;
-	}>;
-}
+import {
+	adapterFromAnswers,
+	type PromptCapture,
+} from "../helpers/prompt-adapter.js";
 
 /**
  * Run a callback with temporary config paths.
@@ -62,111 +48,6 @@ async function withTempConfigHome<T>(
 			process.env["XDG_CONFIG_HOME"] = previous;
 		}
 	}
-}
-
-/**
- * Build a prompt adapter backed by canned answers.
- *
- * @param answers Answers collected from setup prompts.
- * @param capture Input value.
- * @returns Prompt adapter backed by the supplied answers.
- */
-function adapterFromAnswers(
-	answers: {
-		readonly checkboxes?: string[][];
-		readonly confirms: boolean[];
-		readonly inputs: string[];
-		readonly passwords: string[];
-		readonly selects?: string[];
-	},
-	capture: PromptCapture = {},
-): SetupPromptAdapter {
-	return {
-		/**
-		 * Return checked answers for a checkbox prompt.
-		 *
-		 * @param options Options for the operation.
-		 * @returns The result.
-		 */
-		checkbox: async (options) => {
-			capture.checkboxes?.push({
-				choices: options.choices,
-				message: options.message,
-			});
-			return (
-				answers.checkboxes?.shift() ??
-				options.choices
-					.filter((choice) => choice.checked)
-					.map((choice) => choice.value)
-			);
-		},
-
-		/**
-		 * Return the next canned confirm answer.
-		 *
-		 * @returns The result.
-		 */
-		confirm: async () => {
-			const next = answers.confirms.shift();
-			if (next === undefined) throw new Error("missing confirm answer");
-			return next;
-		},
-
-		/**
-		 * Return the next canned input answer.
-		 *
-		 * @param options Options for the operation.
-		 * @returns The result.
-		 */
-		input: async (options) => {
-			capture.inputs?.push({
-				...(options.default !== undefined && {
-					default: options.default,
-				}),
-				message: options.message,
-			});
-			const next = answers.inputs.shift() ?? options.default;
-			if (next === undefined) throw new Error("missing input answer");
-			const validation = options.validate?.(next);
-			if (validation !== undefined && validation !== true)
-				throw new Error(String(validation));
-			return next;
-		},
-
-		/**
-		 * Return the next canned password answer.
-		 *
-		 * @param options Options for the operation.
-		 * @returns The result.
-		 */
-		password: async (options) => {
-			const next = answers.passwords.shift();
-			if (next === undefined) throw new Error("missing password answer");
-			const validation = options.validate?.(next);
-			if (validation !== undefined && validation !== true)
-				throw new Error(String(validation));
-			return next;
-		},
-
-		/**
-		 * Return the next canned select answer.
-		 *
-		 * @param options Options for the operation.
-		 * @returns The result.
-		 */
-		select: async (options) => {
-			capture.selects?.push({
-				choices: options.choices,
-				...(options.default !== undefined && {
-					default: options.default,
-				}),
-				message: options.message,
-			});
-			const next = answers.selects?.shift() ?? options.default;
-			if (next === undefined) throw new Error("missing select answer");
-			return next;
-		},
-	};
 }
 
 describe("polypot setup", () => {
@@ -504,6 +385,7 @@ describe("polypot setup", () => {
 					checkboxes: [],
 				},
 				capture,
+				{ usePromptDefaults: true },
 			),
 		);
 

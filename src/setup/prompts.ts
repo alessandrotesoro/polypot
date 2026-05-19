@@ -1,11 +1,13 @@
-import { checkbox, confirm, input, password, select } from "@inquirer/prompts";
 import type { PolypotConfig } from "../config/schema.js";
 import type { PolypotSecrets } from "../config/secrets.js";
 import {
-	formatSetupLanguage,
-	type SetupLanguageChoice,
-	setupLanguageChoices,
-} from "./languages.js";
+	currentPromptAdapter,
+	messageWithDefault,
+	type PromptAdapter,
+	promptOpenAIApiKey,
+	setPromptAdapterForTests,
+} from "../prompts/common.js";
+import { promptLanguageDefaults } from "../prompts/languages.js";
 
 export interface SetupAnswers {
 	readonly openaiApiKey?: string;
@@ -17,63 +19,9 @@ export interface SetupAnswers {
 	readonly targetLanguages: readonly string[];
 }
 
-export interface SetupPromptAdapter {
-	readonly confirm: (options: {
-		readonly message: string;
-		readonly default?: boolean;
-	}) => Promise<boolean>;
-	readonly checkbox: (options: {
-		readonly message: string;
-		readonly choices: readonly SetupLanguageChoice[];
-		readonly pageSize?: number;
-		readonly required?: boolean;
-	}) => Promise<string[]>;
-	readonly input: (options: {
-		readonly message: string;
-		readonly default?: string;
-		readonly validate?: (value: string) => boolean | string;
-	}) => Promise<string>;
-	readonly password: (options: {
-		readonly message: string;
-		readonly validate?: (value: string) => boolean | string;
-	}) => Promise<string>;
-	readonly select: (options: {
-		readonly message: string;
-		readonly choices: readonly SetupLanguageChoice[];
-		readonly default?: string;
-		readonly pageSize?: number;
-	}) => Promise<string>;
-}
-
-const defaultPromptAdapter: SetupPromptAdapter = {
-	checkbox,
-	confirm,
-	input,
-
-	/**
-	 * Prompt for a masked password.
-	 *
-	 * @param options Options for the operation.
-	 * @returns The result.
-	 */
-	password: (options) => password({ mask: "*", ...options }),
-	select,
-};
+export type SetupPromptAdapter = PromptAdapter;
 
 const SETUP_PROMPT_ADAPTER = Symbol.for("polypot.setupPromptAdapter");
-
-type SetupPromptGlobal = typeof globalThis & {
-	[SETUP_PROMPT_ADAPTER]?: SetupPromptAdapter;
-};
-
-/**
- * Read the global storage slot for prompt adapters.
- *
- * @returns The typed global prompt adapter store.
- */
-function setupPromptGlobal(): SetupPromptGlobal {
-	return globalThis as SetupPromptGlobal;
-}
 
 /**
  * Set or clear the prompt adapter used by tests.
@@ -83,21 +31,7 @@ function setupPromptGlobal(): SetupPromptGlobal {
 export function setSetupPromptAdapterForTests(
 	adapter: SetupPromptAdapter | undefined,
 ): void {
-	const promptGlobal = setupPromptGlobal();
-	if (adapter === undefined) {
-		delete promptGlobal[SETUP_PROMPT_ADAPTER];
-	} else {
-		promptGlobal[SETUP_PROMPT_ADAPTER] = adapter;
-	}
-}
-
-/**
- * Return the current prompt adapter.
- *
- * @returns The active prompt adapter.
- */
-function currentPromptAdapter(): SetupPromptAdapter {
-	return setupPromptGlobal()[SETUP_PROMPT_ADAPTER] ?? defaultPromptAdapter;
+	setPromptAdapterForTests(SETUP_PROMPT_ADAPTER, adapter);
 }
 
 /**
@@ -111,57 +45,6 @@ function parseTemperature(value: string): number | undefined {
 	if (!Number.isFinite(parsed)) return undefined;
 	if (parsed < 0 || parsed > 2) return undefined;
 	return parsed;
-}
-
-/**
- * Add a visible default to prompt text.
- *
- * @param message Input value.
- * @param value Value to parse or format.
- * @returns Prompt text with the default value appended.
- */
-function messageWithDefault(message: string, value: string): string {
-	return `${message} (default: ${value})`;
-}
-
-/**
- * Ask whether to store an OpenAI API key.
- *
- * @param existingSecrets Secrets already stored.
- * @param adapter Prompt adapter to use.
- * @returns The entered API key, or undefined when skipped.
- */
-async function promptOpenAIApiKey(
-	existingSecrets: PolypotSecrets,
-	adapter: SetupPromptAdapter,
-): Promise<string | undefined> {
-	const shouldPromptForKey = existingSecrets.hasOpenaiApiKey
-		? !(await adapter.confirm({
-				message: "Keep existing OpenAI API key? (default: yes)",
-				default: true,
-			}))
-		: await adapter.confirm({
-				message: "Store an OpenAI API key now? (default: yes)",
-				default: true,
-			});
-
-	if (!shouldPromptForKey) return undefined;
-
-	return adapter.password({
-		message: "OpenAI API key",
-
-		/**
-		 * Validate the prompt value.
-		 *
-		 * @param value Value to parse or format.
-		 * @returns The result.
-		 */
-		validate: (value) =>
-			value.trim().length > 0 ||
-			(existingSecrets.hasOpenaiApiKey
-				? "Enter an API key, or keep the existing key."
-				: "Enter an API key, or choose not to store one."),
-	});
 }
 
 /**
@@ -202,9 +85,14 @@ export function buildSetupConfig(
 export async function collectSetupAnswers(
 	existingConfig: PolypotConfig,
 	existingSecrets: PolypotSecrets,
-	adapter: SetupPromptAdapter = currentPromptAdapter(),
+	adapter: SetupPromptAdapter = currentPromptAdapter(SETUP_PROMPT_ADAPTER),
 ): Promise<SetupAnswers> {
-	const openaiApiKey = await promptOpenAIApiKey(existingSecrets, adapter);
+	const openaiApiKey = await promptOpenAIApiKey(existingSecrets, adapter, {
+		keepExistingMessage: "Keep existing OpenAI API key? (default: yes)",
+		promptMessage: "OpenAI API key",
+		storeNewDefault: true,
+		storeNewMessage: "Store an OpenAI API key now? (default: yes)",
+	});
 
 	const validateConnection =
 		openaiApiKey === undefined
@@ -221,13 +109,6 @@ export async function collectSetupAnswers(
 			existingConfig.provider.model,
 		),
 		default: existingConfig.provider.model,
-
-		/**
-		 * Validate the prompt value.
-		 *
-		 * @param value Value to parse or format.
-		 * @returns The result.
-		 */
 		validate: (value) =>
 			value.trim().length > 0 || "Model cannot be empty.",
 	});
@@ -238,44 +119,15 @@ export async function collectSetupAnswers(
 			String(existingConfig.provider.temperature),
 		),
 		default: String(existingConfig.provider.temperature),
-
-		/**
-		 * Validate the prompt value.
-		 *
-		 * @param value Value to parse or format.
-		 * @returns The result.
-		 */
 		validate: (value) =>
 			parseTemperature(value) !== undefined ||
 			"Enter a number from 0 to 2.",
 	});
 
-	const sourceLanguage = await adapter.select({
-		choices: setupLanguageChoices({
-			selected: [existingConfig.source.sourceLanguage],
-		}),
-		default: existingConfig.source.sourceLanguage,
-		message: messageWithDefault(
-			"Default source language",
-			formatSetupLanguage(existingConfig.source.sourceLanguage),
-		),
-		pageSize: 12,
-	});
-
-	const targetLanguages = await adapter.checkbox({
-		choices: setupLanguageChoices({
-			selected: existingConfig.source.targetLanguages,
-		}),
-		message: messageWithDefault(
-			"Default target languages",
-			existingConfig.source.targetLanguages.length > 0
-				? existingConfig.source.targetLanguages
-						.map(formatSetupLanguage)
-						.join(", ")
-				: "none",
-		),
-		pageSize: 12,
-		required: false,
+	const languages = await promptLanguageDefaults(adapter, {
+		labelPrefix: "Default",
+		sourceLanguage: existingConfig.source.sourceLanguage,
+		targetLanguages: existingConfig.source.targetLanguages,
 	});
 
 	return {
@@ -288,8 +140,8 @@ export async function collectSetupAnswers(
 		temperature:
 			parseTemperature(temperatureAnswer) ??
 			existingConfig.provider.temperature,
-		sourceLanguage,
-		targetLanguages,
+		sourceLanguage: languages.sourceLanguage,
+		targetLanguages: languages.targetLanguages,
 	};
 }
 
@@ -300,7 +152,7 @@ export async function collectSetupAnswers(
  * @returns True when setup files may be changed.
  */
 export async function confirmSetupUpdate(
-	adapter: SetupPromptAdapter = currentPromptAdapter(),
+	adapter: SetupPromptAdapter = currentPromptAdapter(SETUP_PROMPT_ADAPTER),
 ): Promise<boolean> {
 	return adapter.confirm({
 		message: "Update existing global Polypot setup? (default: no)",

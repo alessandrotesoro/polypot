@@ -43,4 +43,16 @@ describe("smoke", () => {
 		expect(readme).to.include("OPENAI_API_KEY");
 		expect(readme).to.not.include("setup wizard not implemented");
 	});
+
+	it("README documents the init command as implemented", () => {
+		const readme = fs.readFileSync("README.md", "utf8");
+		expect(readme).to.include("polypot init");
+		expect(readme).to.include(".polypot/config.yaml");
+		expect(readme).to.include(".polypot/.env");
+		expect(readme).to.include("--[no-]gitignore");
+		expect(readme).to.not.include("init not implemented");
+		expect(readme).to.not.include(
+			"polypot init` is currently scaffolded",
+		);
+	});
 });

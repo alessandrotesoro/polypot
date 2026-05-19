@@ -1,3 +1,6 @@
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { runCommand } from "@oclif/test";
 import { expect } from "chai";
 
@@ -106,5 +109,36 @@ describe("polypot translate", () => {
 		expect(stdout).to.include('"appConfig"');
 		expect(stdout).to.include('"openai"');
 		expect(stdout).to.include('"batchSize": 20');
+	});
+
+	it("loads project config overrides from the current working directory", async () => {
+		const previousCwd = process.cwd();
+		const projectDir = await fs.mkdtemp(
+			path.join(os.tmpdir(), "polypot-translate-project-"),
+		);
+
+		try {
+			await fs.mkdir(path.join(projectDir, ".polypot"));
+			await fs.writeFile(
+				path.join(projectDir, ".polypot", "config.yaml"),
+				"provider:\n  model: project-model\nsource:\n  sourceLanguage: it_IT\n  targetLanguages:\n    - fr_FR\n",
+			);
+			process.chdir(projectDir);
+
+			const { stdout, error } = await runCommand([
+				"translate",
+				"-p",
+				"foo.pot",
+				"--dry-run",
+			]);
+
+			expect(error).to.equal(undefined);
+			expect(stdout).to.include('"model": "project-model"');
+			expect(stdout).to.include('"sourceLanguage": "it_IT"');
+			expect(stdout).to.include('"fr_FR"');
+		} finally {
+			process.chdir(previousCwd);
+			await fs.rm(projectDir, { recursive: true, force: true });
+		}
 	});
 });

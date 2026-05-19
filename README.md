@@ -2,7 +2,7 @@
 
 AI-powered translation CLI for `.pot` files. A from-scratch reimagining of [Potomatic](https://github.com/GravityKit/Potomatic) built on [OCLIF](https://oclif.io).
 
-> **Status:** early CLI release. `polypot setup` writes global OpenAI connection defaults; `init` and `translate` are still scaffolded and no translation work happens yet.
+> **Status:** early CLI release. `polypot setup` writes global OpenAI connection defaults, `polypot init` writes project configuration, and `translate` is still scaffolded with no translation work yet.
 
 ## Install
 
@@ -19,7 +19,7 @@ npm run build
 # Configure global defaults
 ./bin/run.js setup
 
-# Initialise per-project config in the current directory (currently scaffolded)
+# Initialise per-project config in the current directory
 ./bin/run.js init
 
 # Translate a .pot file (currently scaffolded)
@@ -35,7 +35,12 @@ npm run build
 
 `<configDir>` resolves to `~/.config/polypot` on Linux/macOS and `%LOCALAPPDATA%\polypot` on Windows (XDG-aware).
 
-Project config, project `.env`, and full CLI precedence layering are planned follow-up work.
+`polypot init` writes project-level config in the current project:
+
+- `.polypot/config.yaml` for commit-ready project defaults.
+- `.polypot/.env` for project-local `OPENAI_API_KEY`.
+
+Project YAML overrides global YAML at runtime. Project `.env` overrides the global `.env`, and `.polypot/.env` is added to `.gitignore` by default.
 
 ## Commands
 
@@ -50,28 +55,41 @@ Initialise polypot configuration in the current project
 
 ```
 USAGE
-  $ polypot init [-f] [--cwd <value>] [--gitignore] [-y]
+  $ polypot init [--json] [-f] [--cwd <value>] [--gitignore] [-k <value>] [-o <value>] [-p <value>] [-s
+    <value>] [-l <value>...] [-y]
 
 FLAGS
-  -f, --force        [env: POLYPOT_FORCE] Overwrite existing .polypot/ files.
-  -y, --yes          [env: POLYPOT_YES] Accept defaults non-interactively.
-      --cwd=<value>  [env: POLYPOT_CWD] Target project directory (defaults to the current working directory).
-  --[no-]gitignore   [env: POLYPOT_GITIGNORE] Append .polypot/.env to the project .gitignore (default).
+  -f, --force                        [env: POLYPOT_FORCE] Overwrite existing .polypot/ files.
+  -k, --api-key=<value>              [env: POLYPOT_API_KEY] Project OpenAI API key to store in .polypot/.env.
+  -l, --target-languages=<value>...  [env: POLYPOT_TARGET_LANGUAGES] Default target language codes for this project.
+  -o, --output-dir=<value>           [env: POLYPOT_OUTPUT_DIR] Default output directory for this project.
+  -p, --pot-file-path=<value>        [env: POLYPOT_POT_FILE_PATH] Default .pot file path for this project.
+  -s, --source-language=<value>      [env: POLYPOT_SOURCE_LANGUAGE] Default source language code for this project.
+  -y, --yes                          [env: POLYPOT_YES] Accept defaults non-interactively.
+      --cwd=<value>                  [env: POLYPOT_CWD] Target project directory (defaults to the current working
+                                     directory).
+  --[no-]gitignore                   [env: POLYPOT_GITIGNORE] Append .polypot/.env to the project .gitignore (default).
+
+GLOBAL FLAGS
+  --json  Format output as json.
 
 DESCRIPTION
   Initialise polypot configuration in the current project
 
 
-  Scaffolded command for future per-project config creation.
+  Creates a .polypot directory in the target project with commit-ready
+  config.yaml defaults and an optional local .env file for project secrets.
 
-  Current release prints the files it would write, but does not create
-  .polypot/config.yaml, .polypot/.env, or update .gitignore yet.
+  Project config overrides global setup values at runtime. Project .env files
+  are added to .gitignore by default.
 
 
 EXAMPLES
   $ polypot init
 
   $ polypot init --yes
+
+  $ polypot init --yes --source-language en_US --target-languages fr_FR,es_ES
 
   $ polypot init --no-gitignore
 

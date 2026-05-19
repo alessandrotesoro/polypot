@@ -1,10 +1,20 @@
 import {
-	readGlobalConfig,
+	readGlobalConfigInputStatus,
 	readGlobalSecrets,
-	readPolypotConfigFile,
-} from "./global-store.js";
-import { type PolypotConfig, PolypotConfigSchema } from "./schema.js";
-import { EMPTY_SECRETS, type PolypotSecrets } from "./secrets.js";
+	readPolypotConfigFileInput,
+	readProjectConfigInputStatus,
+	readProjectSecrets,
+} from "./store.js";
+import {
+	type PolypotConfig,
+	type PolypotConfigInput,
+	PolypotConfigSchema,
+} from "./schema.js";
+import {
+	createPolypotSecrets,
+	EMPTY_SECRETS,
+	type PolypotSecrets,
+} from "./secrets.js";
 
 export interface LoadPolypotConfigOptions {
 	readonly configPath?: string;
@@ -24,17 +34,79 @@ export interface PolypotRuntimeConfig {
 }
 
 /**
- * Load config from the selected source.
+ * Check whether a value is a plain object.
+ *
+ * @param value Value to inspect.
+ * @returns True when the value is mergeable.
+ */
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Deep-merge records without treating schema defaults as overrides.
+ *
+ * @param base Lower-precedence record.
+ * @param override Higher-precedence record.
+ * @returns Merged record.
+ */
+function mergeRecords(
+	base: Record<string, unknown>,
+	override: Record<string, unknown>,
+): Record<string, unknown> {
+	const next: Record<string, unknown> = { ...base };
+
+	for (const [key, value] of Object.entries(override)) {
+		const current = next[key];
+		next[key] =
+			isRecord(current) && isRecord(value)
+				? mergeRecords(current, value)
+				: value;
+	}
+
+	return next;
+}
+
+/**
+ * Deep-merge config layers without treating schema defaults as overrides.
+ *
+ * @param layers Config layers from lowest to highest precedence.
+ * @returns Merged config input.
+ */
+function mergeConfigInputs(
+	...layers: readonly PolypotConfigInput[]
+): PolypotConfigInput {
+	return layers.reduce<PolypotConfigInput>((merged, layer) => {
+		if (!isRecord(merged) || !isRecord(layer)) return layer;
+		return mergeRecords(merged, layer) as PolypotConfigInput;
+	}, {});
+}
+
+/**
+ * Load config input from the selected source.
  *
  * @param args Config loading arguments.
- * @returns Config from the selected source.
+ * @returns Config input from the selected source.
  */
-function loadConfigSource(args: LoadPolypotConfigArgs): Promise<PolypotConfig> {
-	if (args.options?.noConfig === true)
-		return Promise.resolve(PolypotConfigSchema.parse({}));
+async function loadConfigInputSource(
+	args: LoadPolypotConfigArgs,
+): Promise<PolypotConfigInput> {
+	if (args.options?.noConfig === true) return {};
 	if (args.options?.configPath !== undefined)
-		return readPolypotConfigFile(args.options.configPath);
-	return readGlobalConfig({ configDir: args.configDir, cwd: args.cwd });
+		return readPolypotConfigFileInput(args.options.configPath);
+
+	const [globalConfig, projectConfig] = await Promise.all([
+		readGlobalConfigInputStatus({
+			configDir: args.configDir,
+			cwd: args.cwd,
+		}),
+		readProjectConfigInputStatus({
+			configDir: args.configDir,
+			cwd: args.cwd,
+		}),
+	]);
+
+	return mergeConfigInputs(globalConfig.config, projectConfig.config);
 }
 
 /**
@@ -43,11 +115,19 @@ function loadConfigSource(args: LoadPolypotConfigArgs): Promise<PolypotConfig> {
  * @param args Config loading arguments.
  * @returns Secrets from the selected source.
  */
-function loadSecretsSource(
+async function loadSecretsSource(
 	args: LoadPolypotConfigArgs,
 ): Promise<PolypotSecrets> {
-	if (args.options?.noEnv === true) return Promise.resolve(EMPTY_SECRETS);
-	return readGlobalSecrets(args);
+	if (args.options?.noEnv === true) return EMPTY_SECRETS;
+
+	const [globalSecrets, projectSecrets] = await Promise.all([
+		readGlobalSecrets(args),
+		readProjectSecrets(args),
+	]);
+
+	return createPolypotSecrets(
+		projectSecrets.openaiApiKey ?? globalSecrets.openaiApiKey,
+	);
 }
 
 /**
@@ -59,7 +139,7 @@ function loadSecretsSource(
 export async function loadPolypotConfig(
 	args: LoadPolypotConfigArgs,
 ): Promise<PolypotConfig> {
-	return loadConfigSource(args);
+	return PolypotConfigSchema.parse(await loadConfigInputSource(args));
 }
 
 /**
@@ -71,13 +151,13 @@ export async function loadPolypotConfig(
 export async function loadPolypotRuntimeConfig(
 	args: LoadPolypotConfigArgs,
 ): Promise<PolypotRuntimeConfig> {
-	const [config, secrets] = await Promise.all([
-		loadConfigSource(args),
+	const [configInput, secrets] = await Promise.all([
+		loadConfigInputSource(args),
 		loadSecretsSource(args),
 	]);
 
 	return {
-		config,
+		config: PolypotConfigSchema.parse(configInput),
 		secrets,
 	};
 }

@@ -7,7 +7,7 @@ import {
 	readGlobalSecrets,
 	writeGlobalConfig,
 	writeGlobalSecrets,
-} from "../config/global-store.js";
+} from "../config/store.js";
 import type { ResolveConfigPathsOptions } from "../config/paths.js";
 import { resolveConfigPaths } from "../config/paths.js";
 import type { PolypotConfig } from "../config/schema.js";
