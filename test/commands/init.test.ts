@@ -11,8 +11,12 @@ import {
 import {
 	DEFAULT_OPENAI_MODEL,
 	DEFAULT_SOURCE_LANGUAGE,
+	type PolypotConfigInput,
 } from "../../src/config/schema.js";
-import { setInitPromptAdapterForTests } from "../../src/init/prompts.js";
+import {
+	buildInitConfig,
+	setInitPromptAdapterForTests,
+} from "../../src/init/prompts.js";
 import { adapterFromAnswers } from "../helpers/prompt-adapter.js";
 
 /**
@@ -42,6 +46,33 @@ function projectStoreOptions(projectDir: string): {
 		configDir: path.join(projectDir, "global"),
 		cwd: projectDir,
 	};
+}
+
+function withEnv<T>(
+	values: Record<string, string | undefined>,
+	fn: () => Promise<T>,
+): Promise<T> {
+	const previous = new Map(
+		Object.keys(values).map((key) => [key, process.env[key]]),
+	);
+
+	for (const [key, value] of Object.entries(values)) {
+		if (value === undefined) {
+			delete process.env[key];
+		} else {
+			process.env[key] = value;
+		}
+	}
+
+	return fn().finally(() => {
+		for (const [key, value] of previous) {
+			if (value === undefined) {
+				delete process.env[key];
+			} else {
+				process.env[key] = value;
+			}
+		}
+	});
 }
 
 describe("polypot init", () => {
@@ -198,6 +229,41 @@ describe("polypot init", () => {
 		}
 	});
 
+	it("--json returns cancellation output when --yes would overwrite existing files", async () => {
+		const projectDir = tempProjectDir();
+		try {
+			fs.mkdirSync(path.join(projectDir, ".polypot"));
+			const configPath = path.join(projectDir, ".polypot", "config.yaml");
+			const envPath = path.join(projectDir, ".polypot", ".env");
+			fs.writeFileSync(configPath, "provider:\n  model: existing-model\n");
+			fs.writeFileSync(envPath, "OPENAI_API_KEY=sk-existing-secret\n");
+			const beforeConfig = fs.readFileSync(configPath, "utf8");
+			const beforeEnv = fs.readFileSync(envPath, "utf8");
+
+			const { stdout, error } = await runCommand([
+				"init",
+				"--json",
+				"--yes",
+				"--cwd",
+				projectDir,
+			]);
+			const result = JSON.parse(stdout) as {
+				readonly status: string;
+				readonly openaiApiKey: string;
+				readonly gitignore: string;
+			};
+
+			expect(error).to.equal(undefined);
+			expect(result.status).to.equal("cancelled");
+			expect(result.openaiApiKey).to.equal("present");
+			expect(result.gitignore).to.equal(".polypot/.env");
+			expect(fs.readFileSync(configPath, "utf8")).to.equal(beforeConfig);
+			expect(fs.readFileSync(envPath, "utf8")).to.equal(beforeEnv);
+		} finally {
+			removeTempProjectDir(projectDir);
+		}
+	});
+
 	it("runs the interactive init flow and writes selected values", async () => {
 		const projectDir = tempProjectDir();
 		try {
@@ -234,6 +300,54 @@ describe("polypot init", () => {
 			expect(config.source.potFilePath).to.equal("translations.pot");
 			expect(config.output.outputDir).to.equal("languages");
 			expect(secrets.openaiApiKey).to.equal("sk-project-secret");
+		} finally {
+			removeTempProjectDir(projectDir);
+		}
+	});
+
+	it("accepts project values from environment-backed flags", async () => {
+		const projectDir = tempProjectDir();
+		try {
+			await withEnv(
+				{
+					POLYPOT_API_KEY: "sk-project-env-secret",
+					POLYPOT_CWD: projectDir,
+					POLYPOT_GITIGNORE: "false",
+					POLYPOT_OUTPUT_DIR: "env-languages",
+					POLYPOT_POT_FILE_PATH: "env-translations.pot",
+					POLYPOT_SOURCE_LANGUAGE: "it_IT",
+					POLYPOT_TARGET_LANGUAGES: "fr_FR,es_ES",
+					POLYPOT_YES: "true",
+				},
+				async () => {
+					const { stdout, error } = await runCommand(["init"]);
+					const config = await readProjectConfig(
+						projectStoreOptions(projectDir),
+					);
+					const secrets = await readProjectSecrets(
+						projectStoreOptions(projectDir),
+					);
+
+					expect(error).to.equal(undefined);
+					expect(stdout).to.include("OPENAI_API_KEY: present");
+					expect(stdout).to.not.include("sk-project-env-secret");
+					expect(config.source.sourceLanguage).to.equal("it_IT");
+					expect(config.source.targetLanguages).to.deep.equal([
+						"fr_FR",
+						"es_ES",
+					]);
+					expect(config.source.potFilePath).to.equal(
+						"env-translations.pot",
+					);
+					expect(config.output.outputDir).to.equal("env-languages");
+					expect(secrets.openaiApiKey).to.equal(
+						"sk-project-env-secret",
+					);
+					expect(
+						fs.existsSync(path.join(projectDir, ".gitignore")),
+					).to.equal(false);
+				},
+			);
 		} finally {
 			removeTempProjectDir(projectDir);
 		}
@@ -473,6 +587,59 @@ describe("polypot init", () => {
 		}
 	});
 
+	it("--force can replace malformed project YAML using defaults", async () => {
+		const projectDir = tempProjectDir();
+		try {
+			fs.mkdirSync(path.join(projectDir, ".polypot"));
+			fs.writeFileSync(
+				path.join(projectDir, ".polypot", "config.yaml"),
+				"provider: [",
+			);
+
+			const { error } = await runCommand([
+				"init",
+				"--force",
+				"--yes",
+				"--cwd",
+				projectDir,
+			]);
+			const config = await readProjectConfig(
+				projectStoreOptions(projectDir),
+			);
+
+			expect(error).to.equal(undefined);
+			expect(config.provider.model).to.equal(DEFAULT_OPENAI_MODEL);
+			expect(config.source.sourceLanguage).to.equal(
+				DEFAULT_SOURCE_LANGUAGE,
+			);
+		} finally {
+			removeTempProjectDir(projectDir);
+		}
+	});
+
+	it("keeps malformed project YAML unchanged when update cannot be read", async () => {
+		const projectDir = tempProjectDir();
+		try {
+			fs.mkdirSync(path.join(projectDir, ".polypot"));
+			const configPath = path.join(projectDir, ".polypot", "config.yaml");
+			fs.writeFileSync(configPath, "provider: [");
+			setInitPromptAdapterForTests(
+				adapterFromAnswers({
+					confirms: [true],
+					inputs: [],
+					passwords: [],
+				}),
+			);
+
+			const { error } = await runCommand(["init", "--cwd", projectDir]);
+
+			expect(error).to.not.equal(undefined);
+			expect(fs.readFileSync(configPath, "utf8")).to.equal("provider: [");
+		} finally {
+			removeTempProjectDir(projectDir);
+		}
+	});
+
 	it("clears existing optional paths when prompt answers are blank", async () => {
 		const projectDir = tempProjectDir();
 		try {
@@ -547,5 +714,55 @@ describe("polypot init", () => {
 		} finally {
 			removeTempProjectDir(projectDir);
 		}
+	});
+});
+
+describe("buildInitConfig", () => {
+	it("preserves unrelated project config while replacing init-owned fields", () => {
+		const existingConfig: PolypotConfigInput = {
+			behavior: {
+				forceTranslate: true,
+			},
+			output: {
+				outputDir: "old-output",
+				outputFormat: "json",
+			},
+			performance: {
+				batchSize: 5,
+			},
+			provider: {
+				model: "project-model",
+				provider: "openai",
+				temperature: 0.2,
+			},
+			source: {
+				inputPoPath: "existing.po",
+				potFilePath: "old.pot",
+				sourceLanguage: "en_US",
+				targetLanguages: ["fr_FR"],
+			},
+		};
+
+			const config = buildInitConfig(existingConfig, {
+				outputDir: "new-output",
+				potFilePath: "new.pot",
+				sourceLanguage: "it_IT",
+				targetLanguages: ["de_DE"],
+			});
+			if (config === undefined) throw new Error("expected config input");
+
+			expect(config.provider).to.deep.equal(existingConfig.provider);
+		expect(config.behavior).to.deep.equal(existingConfig.behavior);
+		expect(config.performance).to.deep.equal(existingConfig.performance);
+		expect(config.source).to.deep.equal({
+			inputPoPath: "existing.po",
+			potFilePath: "new.pot",
+			sourceLanguage: "it_IT",
+			targetLanguages: ["de_DE"],
+		});
+		expect(config.output).to.deep.equal({
+			outputDir: "new-output",
+			outputFormat: "json",
+		});
 	});
 });

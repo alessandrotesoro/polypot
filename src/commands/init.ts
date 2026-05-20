@@ -40,6 +40,12 @@ const EMPTY_PROJECT_CONFIG: ExistingProjectConfig = {
 	input: {},
 };
 
+function normalizeTargetLanguages(
+	value: readonly string[] | string,
+): readonly string[] {
+	return typeof value === "string" ? value.split(",") : value;
+}
+
 /**
  * Initialize project-level Polypot config.
  */
@@ -192,7 +198,10 @@ are added to .gitignore by default.
 			readonly "output-dir"?: string | undefined;
 			readonly "pot-file-path"?: string | undefined;
 			readonly "source-language"?: string | undefined;
-			readonly "target-languages"?: string[] | undefined;
+			readonly "target-languages"?:
+				| readonly string[]
+				| string
+				| undefined;
 		},
 	): InitAnswers {
 		return {
@@ -210,7 +219,9 @@ are added to .gitignore by default.
 				sourceLanguage: flags["source-language"],
 			}),
 			...(flags["target-languages"] !== undefined && {
-				targetLanguages: flags["target-languages"],
+				targetLanguages: normalizeTargetLanguages(
+					flags["target-languages"],
+				),
 			}),
 		};
 	}

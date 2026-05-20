@@ -215,6 +215,32 @@ describe("project config store", () => {
 		expect(yaml).to.not.include("OPENAI_API_KEY");
 	});
 
+	it("writes sparse project YAML without materializing schema defaults", async () => {
+		const projectDir = await tempConfigDir();
+
+		await writeProjectConfig({
+			configDir: path.join(projectDir, "global"),
+			cwd: projectDir,
+			config: {
+				source: {
+					sourceLanguage: "it_IT",
+					targetLanguages: ["fr_FR"],
+				},
+			},
+		});
+
+		const yaml = await fs.readFile(
+			path.join(projectDir, ".polypot", "config.yaml"),
+			"utf8",
+		);
+
+		expect(yaml).to.include("source:");
+		expect(yaml).to.not.include("provider:");
+		expect(yaml).to.not.include("behavior:");
+		expect(yaml).to.not.include("performance:");
+		expect(yaml).to.not.include("retries:");
+	});
+
 	it("writes and reads OPENAI_API_KEY only from project .env", async () => {
 		const projectDir = await tempConfigDir();
 
@@ -330,6 +356,29 @@ describe("project config store", () => {
 		}
 	});
 
+	it("refuses to write project config through a symlinked .polypot directory on POSIX", async function () {
+		if (process.platform === "win32") this.skip();
+		const projectDir = await tempConfigDir();
+		const targetDir = path.join(projectDir, "outside-polypot");
+		await fs.mkdir(targetDir);
+		await fs.symlink(targetDir, path.join(projectDir, ".polypot"));
+
+		try {
+			await writeProjectConfig({
+				configDir: path.join(projectDir, "global"),
+				cwd: projectDir,
+				config: {},
+			});
+			expect.fail("expected writeProjectConfig to throw");
+		} catch (error) {
+			expect(error).to.be.instanceOf(Error);
+			if (!(error instanceof Error)) throw error;
+			expect(error.message).to.include(
+				"Refusing to use symlinked config directory",
+			);
+		}
+	});
+
 	it("refuses to write project secrets through a symlink on POSIX", async function () {
 		if (process.platform === "win32") this.skip();
 		const projectDir = await tempConfigDir();
@@ -349,6 +398,29 @@ describe("project config store", () => {
 			expect(error).to.be.instanceOf(Error);
 			if (!(error instanceof Error)) throw error;
 			expect(error.message).to.include("Refusing to write through symlink");
+		}
+	});
+
+	it("refuses to write project secrets through a symlinked .polypot directory on POSIX", async function () {
+		if (process.platform === "win32") this.skip();
+		const projectDir = await tempConfigDir();
+		const targetDir = path.join(projectDir, "outside-polypot");
+		await fs.mkdir(targetDir);
+		await fs.symlink(targetDir, path.join(projectDir, ".polypot"));
+
+		try {
+			await writeProjectSecrets({
+				configDir: path.join(projectDir, "global"),
+				cwd: projectDir,
+				secrets: { openaiApiKey: "sk-project-secret" },
+			});
+			expect.fail("expected writeProjectSecrets to throw");
+		} catch (error) {
+			expect(error).to.be.instanceOf(Error);
+			if (!(error instanceof Error)) throw error;
+			expect(error.message).to.include(
+				"Refusing to use symlinked config directory",
+			);
 		}
 	});
 });
