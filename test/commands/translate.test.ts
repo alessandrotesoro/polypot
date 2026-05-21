@@ -127,6 +127,87 @@ describe("polypot translate", () => {
 		);
 	});
 
+	it("rejects preview numeric values outside documented ranges", async () => {
+		const invalidCases = [
+			{
+				args: ["--batch-size", "0"],
+				message: "--batch-size must be an integer between 1 and 100",
+			},
+			{
+				args: ["--jobs", "0"],
+				message: "--jobs must be an integer between 1 and 10",
+			},
+			{
+				args: ["--max-strings-per-job", "0"],
+				message:
+					"--max-strings-per-job must be an integer greater than or equal to 1",
+			},
+			{
+				args: ["--max-cost", "12abc"],
+				message: "--max-cost must be a non-negative number",
+			},
+		];
+
+		for (const invalidCase of invalidCases) {
+			const { error } = await runCommand([
+				"translate",
+				"-l",
+				"fr_FR",
+				"-p",
+				"foo.pot",
+				"--dry-run",
+				...invalidCase.args,
+			]);
+
+			expect(
+				error,
+				`expected ${invalidCase.args.join(" ")} to fail`,
+			).to.not.equal(undefined);
+			expect(error?.message).to.include(invalidCase.message);
+		}
+	});
+
+	it("rejects path-like target language values", async () => {
+		const invalidValues = ["../escape", "fr/FR", "fr\\FR", "", "C:fr_FR"];
+
+		for (const language of invalidValues) {
+			const { error } = await runCommand([
+				"translate",
+				"-l",
+				language,
+				"-p",
+				"foo.pot",
+				"--dry-run",
+			]);
+
+			expect(
+				error,
+				`expected ${JSON.stringify(language)} to fail`,
+			).to.not.equal(undefined);
+			if (language.length > 0) {
+				expect(error?.message).to.include(
+					"--target-languages includes unsafe value",
+				);
+			}
+		}
+	});
+
+	it("rejects duplicate target language values", async () => {
+		const { error } = await runCommand([
+			"translate",
+			"-l",
+			"fr_FR,fr_FR",
+			"-p",
+			"foo.pot",
+			"--dry-run",
+		]);
+
+		expect(error).to.not.equal(undefined);
+		expect(error?.message).to.include(
+			"--target-languages includes duplicate value",
+		);
+	});
+
 	it("renders a UI-only translation preview with per-language progress", async () => {
 		const { stdout, error } = await runCommand([
 			"translate",
@@ -177,6 +258,209 @@ describe("polypot translate", () => {
 		expect(result.summary).to.include(
 			"Translation logic is not implemented yet.",
 		);
+	});
+
+	it("writes JSON preview output to --output-file", async () => {
+		const outputDir = await fs.mkdtemp(
+			path.join(os.tmpdir(), "polypot-translate-output-"),
+		);
+		const outputFile = path.join(outputDir, "preview.json");
+
+		try {
+			const { stdout, error } = await runCommand([
+				"translate",
+				"-l",
+				"fr_FR",
+				"-p",
+				"foo.pot",
+				"--dry-run",
+				"--output-format",
+				"json",
+				"--output-file",
+				outputFile,
+			]);
+			const output = JSON.parse(
+				await fs.readFile(outputFile, "utf8"),
+			) as {
+				readonly results: readonly {
+					readonly language: string;
+				}[];
+				readonly status: string;
+			};
+
+			expect(error).to.equal(undefined);
+			expect(stdout).to.include("JSON preview written to:");
+			expect(stdout).to.not.include("not written");
+			expect(output.status).to.equal("previewed");
+			expect(output.results[0]?.language).to.equal("fr_FR");
+		} finally {
+			await fs.rm(outputDir, { recursive: true, force: true });
+		}
+	});
+
+	it("suppresses human success output at --verbose-level 0", async () => {
+		const { stdout, error } = await runCommand([
+			"translate",
+			"-l",
+			"fr_FR",
+			"-p",
+			"foo.pot",
+			"--dry-run",
+			"--verbose-level",
+			"0",
+		]);
+
+		expect(error).to.equal(undefined);
+		expect(stdout).to.equal("");
+	});
+
+	it("still emits explicit JSON stdout at --verbose-level 0", async () => {
+		const { stdout, error } = await runCommand([
+			"translate",
+			"-l",
+			"fr_FR",
+			"-p",
+			"foo.pot",
+			"--dry-run",
+			"--output-format",
+			"json",
+			"--verbose-level",
+			"0",
+		]);
+		const result = JSON.parse(stdout) as {
+			readonly status: string;
+		};
+
+		expect(error).to.equal(undefined);
+		expect(result.status).to.equal("previewed");
+	});
+
+	it("exposes resolved non-secret translate settings in JSON output", async () => {
+		const { stdout, error } = await runCommand([
+			"translate",
+			"--json",
+			"-l",
+			"fr_FR,es_ES",
+			"-p",
+			"foo.pot",
+			"--input-po-path",
+			"base.po",
+			"--output-dir",
+			"languages",
+			"--output-format",
+			"json",
+			"--po-file-prefix",
+			"app-",
+			"--locale-format",
+			"wp_locale",
+			"--use-dictionary",
+			"--dictionary-path",
+			"dicts",
+			"--prompt-file-path",
+			"prompt.md",
+			"--po-header-template-path",
+			"header.json",
+			"--batch-size",
+			"10",
+			"--jobs",
+			"3",
+			"--timeout",
+			"30",
+			"--max-strings-per-job",
+			"15",
+			"--max-total-strings",
+			"25",
+			"--max-cost",
+			"1.25",
+			"--max-retries",
+			"4",
+			"--retry-delay",
+			"1000",
+			"--abort-on-failure",
+			"--skip-language-on-failure",
+			"--verbose-level",
+			"2",
+			"--dry-run",
+			"--save-debug-info",
+		]);
+		const result = JSON.parse(stdout) as {
+			readonly plan: {
+				readonly settings: {
+					readonly behavior: {
+						readonly dictionaryPath: string;
+						readonly poHeaderTemplatePath: string;
+						readonly promptFilePath: string;
+						readonly useDictionary: boolean;
+					};
+					readonly debug: {
+						readonly saveDebugInfo: boolean;
+						readonly verboseLevel: number;
+					};
+					readonly limits: {
+						readonly maxCost: number;
+						readonly maxStringsPerJob: number;
+						readonly maxTotalStrings: number;
+					};
+					readonly output: {
+						readonly localeFormat: string;
+						readonly outputDir: string;
+						readonly outputFormat: string;
+						readonly poFilePrefix: string;
+					};
+					readonly performance: {
+						readonly timeout: number;
+					};
+					readonly retries: {
+						readonly abortOnFailure: boolean;
+						readonly maxRetries: number;
+						readonly retryDelay: number;
+						readonly skipLanguageOnFailure: boolean;
+					};
+					readonly source: {
+						readonly inputPoPath: string;
+						readonly potFilePath: string;
+						readonly targetLanguages: readonly string[];
+					};
+				};
+			};
+		};
+		const settings = result.plan.settings;
+
+		expect(error).to.equal(undefined);
+		expect(settings.source).to.deep.include({
+			inputPoPath: "base.po",
+			potFilePath: "foo.pot",
+		});
+		expect(settings.source.targetLanguages).to.deep.equal([
+			"fr_FR",
+			"es_ES",
+		]);
+		expect(settings.output).to.deep.include({
+			localeFormat: "wp_locale",
+			outputDir: "languages",
+			outputFormat: "json",
+			poFilePrefix: "app-",
+		});
+		expect(settings.behavior).to.deep.include({
+			dictionaryPath: "dicts",
+			poHeaderTemplatePath: "header.json",
+			promptFilePath: "prompt.md",
+			useDictionary: true,
+		});
+		expect(settings.performance.timeout).to.equal(30);
+		expect(settings.limits).to.deep.equal({
+			maxCost: 1.25,
+			maxStringsPerJob: 15,
+			maxTotalStrings: 25,
+		});
+		expect(settings.retries).to.deep.equal({
+			abortOnFailure: true,
+			maxRetries: 4,
+			retryDelay: 1000,
+			skipLanguageOnFailure: true,
+		});
+		expect(settings.debug.saveDebugInfo).to.equal(true);
+		expect(settings.debug.verboseLevel).to.equal(2);
 	});
 
 	it("keeps JSON language results in requested order", async () => {

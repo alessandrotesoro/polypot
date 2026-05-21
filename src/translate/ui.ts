@@ -32,9 +32,60 @@ interface TranslateConfigSnapshot {
 	readonly provider: string;
 }
 
+export interface TranslateSettingsSnapshot {
+	readonly behavior: {
+		readonly dictionaryPath: string;
+		readonly forceTranslate: boolean;
+		readonly poHeaderTemplatePath: string;
+		readonly promptFilePath: string;
+		readonly useDictionary: boolean;
+	};
+	readonly debug: {
+		readonly dryRun: boolean;
+		readonly saveDebugInfo: boolean;
+		readonly verboseLevel: number;
+	};
+	readonly limits: {
+		readonly maxCost?: number;
+		readonly maxStringsPerJob?: number;
+		readonly maxTotalStrings?: number;
+	};
+	readonly output: {
+		readonly localeFormat: string;
+		readonly outputDir: string;
+		readonly outputFile?: string;
+		readonly outputFormat: string;
+		readonly poFilePrefix?: string;
+	};
+	readonly performance: {
+		readonly batchSize: number;
+		readonly jobs: number;
+		readonly timeout: number;
+	};
+	readonly provider: {
+		readonly maxTokens?: number;
+		readonly model: string;
+		readonly provider: string;
+		readonly temperature: number | string;
+	};
+	readonly retries: {
+		readonly abortOnFailure: boolean;
+		readonly maxRetries: number;
+		readonly retryDelay: number;
+		readonly skipLanguageOnFailure: boolean;
+	};
+	readonly source: {
+		readonly inputPoPath?: string;
+		readonly potFilePath?: string;
+		readonly sourceLanguage: string;
+		readonly targetLanguages: readonly string[];
+	};
+}
+
 interface TranslateUiPlan {
 	readonly config: TranslateConfigSnapshot;
 	readonly preview: TranslateUiPreviewOptions;
+	readonly settings: TranslateSettingsSnapshot;
 }
 
 export interface LanguagePreviewResult {
@@ -60,6 +111,7 @@ export interface TranslateUiResult {
 		readonly outputDir: string;
 		readonly potFilePath?: string;
 		readonly provider: string;
+		readonly settings: TranslateSettingsSnapshot;
 		readonly sourceLanguage: string;
 	};
 	readonly results: readonly LanguagePreviewResult[];
@@ -245,6 +297,7 @@ export async function runTranslateUiPreview(
 				potFilePath: config.potFilePath,
 			}),
 			provider: config.provider,
+			settings: plan.settings,
 			sourceLanguage: preview.sourceLanguage,
 		},
 	} as const;

@@ -18,4 +18,23 @@ describe("PolypotConfigSchema", () => {
 		expect(result.source.targetLanguages).to.deep.equal([]);
 		expect(result.output.outputDir).to.equal(".");
 	});
+
+	it("rejects invalid preview numeric bounds from config", () => {
+		const invalidConfigs = [
+			{ performance: { batchSize: 0 } },
+			{ performance: { batchSize: 101 } },
+			{ performance: { jobs: 0 } },
+			{ performance: { jobs: 11 } },
+			{ limits: { maxCost: -1 } },
+			{ limits: { maxStringsPerJob: 0 } },
+			{ source: { targetLanguages: ["../escape"] } },
+			{ source: { targetLanguages: ["fr/FR"] } },
+			{ source: { targetLanguages: [""] } },
+			{ source: { targetLanguages: ["fr_FR", "fr_FR"] } },
+		];
+
+		for (const config of invalidConfigs) {
+			expect(() => PolypotConfigSchema.parse(config)).to.throw();
+		}
+	});
 });

@@ -1,8 +1,17 @@
+import fs from "node:fs/promises";
+import path from "node:path";
 import { Flags } from "@oclif/core";
 import { BaseCommand } from "../base-command.js";
 import { DEFAULT_OPENAI_MODEL } from "../config/schema.js";
 import { polypotEnv } from "../flag-helpers.js";
-import { runTranslateUiPreview } from "../translate/ui.js";
+import {
+	isSafeLanguageValue,
+	LANGUAGE_VALUE_ERROR,
+} from "../language-values.js";
+import {
+	runTranslateUiPreview,
+	type TranslateSettingsSnapshot,
+} from "../translate/ui.js";
 
 export default class Translate extends BaseCommand<typeof Translate> {
 	static override summary =
@@ -250,11 +259,41 @@ each target language.
 		const usesJsonStdout =
 			this.jsonEnabled() ||
 			(outputFormat === "json" && outputFile === undefined);
+		const batchSize = this.resolveBoundedInteger(
+			this.flags["batch-size"] ?? this.appConfig.performance.batchSize,
+			"--batch-size",
+			{ max: 100, min: 1 },
+		);
+		const jobs = this.resolveBoundedInteger(
+			this.flags.jobs ?? this.appConfig.performance.jobs,
+			"--jobs",
+			{ max: 10, min: 1 },
+		);
 		const maxCost = this.resolveMaxCost();
+		const maxStringsPerJob = this.resolveOptionalBoundedInteger(
+			this.flags["max-strings-per-job"] ??
+				this.appConfig.limits.maxStringsPerJob,
+			"--max-strings-per-job",
+			{ min: 1 },
+		);
 		const poFilePrefix =
 			this.flags["po-file-prefix"] ?? this.appConfig.output.poFilePrefix;
 		const potFilePath =
 			this.flags["pot-file-path"] ?? this.appConfig.source.potFilePath;
+		const verboseLevel =
+			this.flags["verbose-level"] ?? this.appConfig.debug.verboseLevel;
+		const languages = this.resolveTargetLanguages();
+		const settings = this.buildSettingsSnapshot({
+			batchSize,
+			jobs,
+			languages,
+			outputFormat,
+			...(maxCost !== undefined && { maxCost }),
+			...(maxStringsPerJob !== undefined && { maxStringsPerJob }),
+			...(outputFile !== undefined && { outputFile }),
+			...(poFilePrefix !== undefined && { poFilePrefix }),
+			...(potFilePath !== undefined && { potFilePath }),
+		});
 		const result = await runTranslateUiPreview({
 			config: {
 				forceTranslate:
@@ -265,24 +304,14 @@ each target language.
 				provider:
 					this.flags.provider ?? this.appConfig.provider.provider,
 			},
+			settings,
 			preview: {
-				batchSize:
-					this.flags["batch-size"] ??
-					this.appConfig.performance.batchSize,
+				batchSize,
 				dryRun: this.flags["dry-run"] ?? this.appConfig.debug.dryRun,
-				jobs: this.flags.jobs ?? this.appConfig.performance.jobs,
-				languages:
-					this.flags["target-languages"] ??
-					this.appConfig.source.targetLanguages,
+				jobs,
+				languages,
 				...(maxCost !== undefined && { maxCost }),
-				...(this.flags["max-strings-per-job"] !== undefined && {
-					maxStringsPerJob: this.flags["max-strings-per-job"],
-				}),
-				...(this.flags["max-strings-per-job"] === undefined &&
-					this.appConfig.limits.maxStringsPerJob !== undefined && {
-						maxStringsPerJob:
-							this.appConfig.limits.maxStringsPerJob,
-					}),
+				...(maxStringsPerJob !== undefined && { maxStringsPerJob }),
 				outputDir:
 					this.flags["output-dir"] ?? this.appConfig.output.outputDir,
 				outputFormat: usesJsonStdout ? "json" : outputFormat,
@@ -290,21 +319,21 @@ each target language.
 				sourceLanguage:
 					this.flags["source-language"] ??
 					this.appConfig.source.sourceLanguage,
-				verboseLevel:
-					this.flags["verbose-level"] ??
-					this.appConfig.debug.verboseLevel,
+				verboseLevel,
 			},
 		});
+
+		if (outputFile !== undefined) {
+			await this.writeJsonOutput(outputFile, result);
+		}
 
 		if (!this.jsonEnabled()) {
 			if (outputFormat === "json" && outputFile === undefined) {
 				this.log(JSON.stringify(result, null, 2));
-			} else {
+			} else if (verboseLevel > 0) {
 				this.log(result.summary);
 				if (outputFile !== undefined) {
-					this.log(
-						`JSON output file requested: ${outputFile} (not written in UI preview mode).`,
-					);
+					this.log(`JSON preview written to: ${outputFile}`);
 				}
 			}
 		}
@@ -312,11 +341,204 @@ each target language.
 		return result;
 	}
 
+	private buildSettingsSnapshot(resolved: {
+		readonly batchSize: number;
+		readonly jobs: number;
+		readonly languages: readonly string[];
+		readonly maxCost?: number;
+		readonly maxStringsPerJob?: number;
+		readonly outputFile?: string;
+		readonly outputFormat: string;
+		readonly poFilePrefix?: string;
+		readonly potFilePath?: string;
+	}): TranslateSettingsSnapshot {
+		const inputPoPath =
+			this.flags["input-po-path"] ?? this.appConfig.source.inputPoPath;
+		const maxTokens =
+			this.flags["max-tokens"] ?? this.appConfig.provider.maxTokens;
+		const maxTotalStrings =
+			this.flags["max-total-strings"] ??
+			this.appConfig.limits.maxTotalStrings;
+
+		return {
+			behavior: {
+				dictionaryPath:
+					this.flags["dictionary-path"] ??
+					this.appConfig.behavior.dictionaryPath,
+				forceTranslate:
+					this.flags["force-translate"] ??
+					this.appConfig.behavior.forceTranslate,
+				poHeaderTemplatePath:
+					this.flags["po-header-template-path"] ??
+					this.appConfig.behavior.poHeaderTemplatePath,
+				promptFilePath:
+					this.flags["prompt-file-path"] ??
+					this.appConfig.behavior.promptFilePath,
+				useDictionary:
+					this.flags["use-dictionary"] ??
+					this.appConfig.behavior.useDictionary,
+			},
+			debug: {
+				dryRun: this.flags["dry-run"] ?? this.appConfig.debug.dryRun,
+				saveDebugInfo:
+					this.flags["save-debug-info"] ??
+					this.appConfig.debug.saveDebugInfo,
+				verboseLevel:
+					this.flags["verbose-level"] ??
+					this.appConfig.debug.verboseLevel,
+			},
+			limits: {
+				...(resolved.maxCost !== undefined && {
+					maxCost: resolved.maxCost,
+				}),
+				...(resolved.maxStringsPerJob !== undefined && {
+					maxStringsPerJob: resolved.maxStringsPerJob,
+				}),
+				...(maxTotalStrings !== undefined && { maxTotalStrings }),
+			},
+			output: {
+				localeFormat:
+					this.flags["locale-format"] ??
+					this.appConfig.output.localeFormat,
+				outputDir:
+					this.flags["output-dir"] ?? this.appConfig.output.outputDir,
+				...(resolved.outputFile !== undefined && {
+					outputFile: resolved.outputFile,
+				}),
+				outputFormat: resolved.outputFormat,
+				...(resolved.poFilePrefix !== undefined && {
+					poFilePrefix: resolved.poFilePrefix,
+				}),
+			},
+			performance: {
+				batchSize: resolved.batchSize,
+				jobs: resolved.jobs,
+				timeout:
+					this.flags.timeout ?? this.appConfig.performance.timeout,
+			},
+			provider: {
+				...(maxTokens !== undefined && { maxTokens }),
+				model: this.flags.model ?? this.appConfig.provider.model,
+				provider:
+					this.flags.provider ?? this.appConfig.provider.provider,
+				temperature:
+					this.flags.temperature ??
+					this.appConfig.provider.temperature,
+			},
+			retries: {
+				abortOnFailure:
+					this.flags["abort-on-failure"] ??
+					this.appConfig.retries.abortOnFailure,
+				maxRetries:
+					this.flags["max-retries"] ??
+					this.appConfig.retries.maxRetries,
+				retryDelay:
+					this.flags["retry-delay"] ??
+					this.appConfig.retries.retryDelay,
+				skipLanguageOnFailure:
+					this.flags["skip-language-on-failure"] ??
+					this.appConfig.retries.skipLanguageOnFailure,
+			},
+			source: {
+				...(inputPoPath !== undefined && { inputPoPath }),
+				...(resolved.potFilePath !== undefined && {
+					potFilePath: resolved.potFilePath,
+				}),
+				sourceLanguage:
+					this.flags["source-language"] ??
+					this.appConfig.source.sourceLanguage,
+				targetLanguages: resolved.languages,
+			},
+		};
+	}
+
+	private async writeJsonOutput(
+		outputFile: string,
+		result: unknown,
+	): Promise<void> {
+		const outputDirectory = path.dirname(outputFile);
+		if (outputDirectory !== ".") {
+			await fs.mkdir(outputDirectory, { recursive: true });
+		}
+
+		await fs.writeFile(outputFile, `${JSON.stringify(result, null, 2)}\n`);
+	}
+
+	private resolveTargetLanguages(): readonly string[] {
+		const languages =
+			this.flags["target-languages"] ??
+			this.appConfig.source.targetLanguages;
+		const seenLanguages = new Set<string>();
+		const unsafeLanguage = languages.find(
+			(language) => !isSafeLanguageValue(language),
+		);
+
+		if (unsafeLanguage !== undefined) {
+			this.error(
+				`--target-languages includes unsafe value ${JSON.stringify(
+					unsafeLanguage,
+				)}. ${LANGUAGE_VALUE_ERROR}`,
+				{ exit: 1 },
+			);
+		}
+
+		const duplicateLanguage = languages.find((language) => {
+			if (seenLanguages.has(language)) return true;
+			seenLanguages.add(language);
+
+			return false;
+		});
+
+		if (duplicateLanguage !== undefined) {
+			this.error(
+				`--target-languages includes duplicate value ${JSON.stringify(
+					duplicateLanguage,
+				)}.`,
+				{ exit: 1 },
+			);
+		}
+
+		return languages;
+	}
+
+	private resolveBoundedInteger(
+		value: number,
+		flagName: string,
+		bounds: { readonly max?: number; readonly min: number },
+	): number {
+		if (
+			!Number.isInteger(value) ||
+			value < bounds.min ||
+			(bounds.max !== undefined && value > bounds.max)
+		) {
+			const rangeText =
+				bounds.max === undefined
+					? `greater than or equal to ${bounds.min}`
+					: `between ${bounds.min} and ${bounds.max}`;
+			this.error(`${flagName} must be an integer ${rangeText}.`, {
+				exit: 1,
+			});
+		}
+
+		return value;
+	}
+
+	private resolveOptionalBoundedInteger(
+		value: number | undefined,
+		flagName: string,
+		bounds: { readonly max?: number; readonly min: number },
+	): number | undefined {
+		if (value === undefined) return undefined;
+
+		return this.resolveBoundedInteger(value, flagName, bounds);
+	}
+
 	private resolveMaxCost(): number | undefined {
 		if (this.flags["max-cost"] === undefined)
 			return this.appConfig.limits.maxCost;
 
-		const maxCost = Number.parseFloat(this.flags["max-cost"]);
+		const maxCostInput = this.flags["max-cost"].trim();
+		const maxCost = Number(maxCostInput);
 		if (!Number.isFinite(maxCost) || maxCost < 0) {
 			this.error("--max-cost must be a non-negative number.", {
 				exit: 1,
