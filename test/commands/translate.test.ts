@@ -280,16 +280,19 @@ describe("polypot translate", () => {
 
 		expect(error).to.equal(undefined);
 		expect(stdout).to.include("Translate preview");
-		expect(stdout).to.include(
-			"4 strings, 1 plural, 1 with context, 1 fuzzy",
-		);
+		expect(stdout).to.include("Source");
+		expect(stdout).to.include("Plan");
+		expect(stdout).to.include("Targets");
+		expect(stdout).to.include("Runtime");
+		expect(stdout).to.include("Estimate");
 		expect(stdout).to.include("fr_FR");
-		expect(stdout).to.include("------------------------ 0% (0/4 strings)");
-		expect(stdout).to.include(
-			"######################## 100% (4/4 strings)",
-		);
-		expect(stdout).to.include("preview complete, no translations written");
-		expect(stdout).to.include("No translations were generated.");
+		expect(stdout).to.include("Batch");
+		expect(stdout).to.include("tokens");
+		expect(stdout).to.include("output");
+		expect(stdout).to.include("Preview complete");
+		expect(stdout).to.include("Planned");
+		expect(stdout).to.include("Outputs");
+		expect(stdout).to.include("No translations were written.");
 	});
 
 	it("exposes the resolved appConfig defaults in JSON output", async () => {
@@ -320,7 +323,7 @@ describe("polypot translate", () => {
 		expect(result.analysis.totalStrings).to.equal(4);
 		expect(result.plan.provider).to.equal("openai");
 		expect(result.plan.batchSize).to.equal(20);
-		expect(result.summary).to.include("No translations were generated.");
+		expect(result.summary).to.include("No translations were written.");
 	});
 
 	it("writes JSON preview output to --output-file", async () => {

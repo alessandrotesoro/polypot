@@ -6,6 +6,7 @@ import {
 	type ListrRendererValue,
 	type ListrTask,
 } from "listr2";
+import color from "yoctocolors";
 import { sanitizeTerminalText } from "../terminal.js";
 import {
 	analyzePotFile,
@@ -200,6 +201,30 @@ function getOutputFile(
 
 function formatCurrency(value: number): string {
 	return `$${value.toFixed(4)}`;
+}
+
+function formatNumber(value: number): string {
+	return new Intl.NumberFormat("en-US").format(value);
+}
+
+function formatCount(
+	value: number,
+	singular: string,
+	plural = `${singular}s`,
+): string {
+	return `${formatNumber(value)} ${value === 1 ? singular : plural}`;
+}
+
+function heading(value: string): string {
+	return color.bold(value);
+}
+
+function label(value: string, width = 10): string {
+	return value.padEnd(width);
+}
+
+function row(name: string, value: string, width?: number): string {
+	return `  ${label(name, width)} ${value}`;
 }
 
 function formatDuration(ms: number): string {
@@ -401,6 +426,22 @@ function formatLimits(preview: TranslateUiPreviewOptions): string {
 	return limits.length === 0 ? "none" : limits.join(" | ");
 }
 
+function formatHumanPath(value: string): string {
+	return sanitizeTerminalText(value);
+}
+
+function formatSourceDetails(analysis: PotAnalysis): string {
+	return `${formatNumber(analysis.pluralStrings)} plural | ${formatNumber(analysis.contextStrings)} context | ${formatNumber(analysis.fuzzyStrings)} fuzzy`;
+}
+
+function formatOutputName(value: string): string {
+	return formatHumanPath(value);
+}
+
+function formatWorkload(workload: TranslatePreviewWorkload): string {
+	return `${formatNumber(workload.plannedStrings)} / ${formatNumber(workload.sourceStrings)} planned strings across ${formatCount(workload.batches, "batch", "batches")}`;
+}
+
 function formatLanguageTitle(
 	preview: TranslateUiPreviewOptions,
 	plan: LanguageWorkPlan,
@@ -417,13 +458,19 @@ function formatLanguageTitle(
 		processed > 0 && processed < plan.plannedStrings
 			? (elapsedMs / processed) * (plan.plannedStrings - processed)
 			: 0;
-	const modeText = preview.dryRun ? "dry run" : "preview";
+	const detail = [
+		phase,
+		`elapsed ${formatDuration(elapsedMs)}`,
+		`eta ${formatDuration(etaMs)}`,
+		preview.dryRun ? "dry run" : "preview",
+		`~${formatNumber(plan.estimate.totalTokens)} tokens`,
+		`~${formatCurrency(plan.estimate.cost)}`,
+		`output ${formatOutputName(plan.outputFile)}`,
+	].join(" | ");
 
 	return [
-		`${plan.language} ${buildProgressBar(processed, plan.plannedStrings)} ${percentage}% (${processed}/${plan.plannedStrings} strings)`,
-		`phase: ${phase} | elapsed ${formatDuration(elapsedMs)} | eta ${formatDuration(etaMs)} | ${modeText}`,
-		`tokens ~${plan.estimate.totalTokens} | cost ~${formatCurrency(plan.estimate.cost)} | skipped ${plan.skippedByLimit + plan.skippedByCost}`,
-		`limits: ${formatLimits(preview)} | output: ${sanitizeTerminalText(plan.outputFile)}`,
+		`${plan.language}  ${buildProgressBar(processed, plan.plannedStrings)}  ${formatNumber(processed)} / ${formatNumber(plan.plannedStrings)}  ${percentage}%`,
+		`  ${color.dim(detail)}`,
 	].join("\n");
 }
 
@@ -448,7 +495,7 @@ function buildLanguageTask(
 				preview,
 				plan,
 				0,
-				"preparing batches",
+				"Preparing",
 				startedAt,
 			);
 			if (stepDelayMs > 0) await delay(stepDelayMs);
@@ -462,7 +509,7 @@ function buildLanguageTask(
 					preview,
 					plan,
 					processed,
-					`batch ${batch}/${plan.batches}`,
+					`Batch ${batch}/${plan.batches}`,
 					startedAt,
 				);
 				if (stepDelayMs > 0) await delay(stepDelayMs);
@@ -472,11 +519,11 @@ function buildLanguageTask(
 				preview,
 				plan,
 				plan.plannedStrings,
-				"validating planned output",
+				"Validating output",
 				startedAt,
 			);
 			if (stepDelayMs > 0) await delay(stepDelayMs);
-			task.title = `${plan.language} ${buildProgressBar(plan.plannedStrings, plan.plannedStrings)} 100% (${plan.plannedStrings}/${plan.plannedStrings} strings) | preview complete, no translations written`;
+			task.title = `${plan.language}  ${buildProgressBar(plan.plannedStrings, plan.plannedStrings)}  ${formatNumber(plan.plannedStrings)} / ${formatNumber(plan.plannedStrings)}  100%\n  Preview complete | no translations written | output ${formatOutputName(plan.outputFile)}`;
 		},
 	};
 }
@@ -502,28 +549,54 @@ function buildPreflight(
 	const analysis = workload.analysis;
 
 	return [
-		"Translate preview",
-		`Source: ${sanitizeTerminalText(analysis.filePath)} (${analysis.totalStrings} strings, ${analysis.pluralStrings} plural, ${analysis.contextStrings} with context, ${analysis.fuzzyStrings} fuzzy)`,
-		`Targets: ${preview.languages.join(", ")} | Jobs: ${getConcurrentJobs(preview)} | Batch size: ${preview.batchSize}`,
-		`Plan: ${workload.plannedStrings}/${workload.sourceStrings} strings, ${workload.batches} batches | Limits: ${formatLimits(preview)}`,
-		`Estimate: ~${workload.estimate.totalTokens} tokens, ~${formatCurrency(workload.estimate.cost)} | No API calls or .po files will be written.`,
+		heading("Translate preview"),
+		"",
+		heading("Source"),
+		row("File", path.basename(formatHumanPath(analysis.filePath))),
+		row("Strings", formatNumber(analysis.totalStrings)),
+		row("Details", formatSourceDetails(analysis)),
+		"",
+		heading("Plan"),
+		row("Targets", preview.languages.join(", ")),
+		row("Workload", formatWorkload(workload)),
+		row(
+			"Runtime",
+			`${formatCount(getConcurrentJobs(preview), "job")}, batch size ${preview.batchSize}`,
+		),
+		row(
+			"Estimate",
+			`~${formatNumber(workload.estimate.totalTokens)} tokens, ~${formatCurrency(workload.estimate.cost)}`,
+		),
+		row("Limits", formatLimits(preview)),
 		"",
 	].join("\n");
 }
 
 function buildSummaryFromWorkload(workload: TranslatePreviewWorkload): string {
-	const languageLines = workload.languages.map(
-		(language) =>
-			`- ${language.language}: ${language.plannedStrings}/${language.sourceStrings} strings, ${language.batches} batches, ~${language.estimate.totalTokens} tokens, ~${formatCurrency(language.estimate.cost)}, output ${sanitizeTerminalText(language.outputFile)}`,
+	const languageLines = workload.languages.map((language) =>
+		row(language.language, formatOutputName(language.outputFile), 9),
 	);
 
 	return [
-		"Preview complete. No translations were generated.",
-		`Languages: ${workload.languages.length} | Source strings: ${workload.analysis.totalStrings} | Planned work: ${workload.plannedStrings}/${workload.sourceStrings} strings`,
-		`Skipped: ${workload.skippedByLimit} by string limits, ${workload.skippedByCost} by cost budget`,
-		`Batches: ${workload.batches} | Estimated tokens: ~${workload.estimate.totalTokens} | Estimated cost: ~${formatCurrency(workload.estimate.cost)}`,
-		"Planned outputs:",
+		"Preview complete",
+		"",
+		"Planned",
+		row("Languages", formatNumber(workload.languages.length)),
+		row(
+			"Strings",
+			`${formatNumber(workload.plannedStrings)} / ${formatNumber(workload.sourceStrings)}`,
+		),
+		row("Batches", formatNumber(workload.batches)),
+		row("Cost", `~${formatCurrency(workload.estimate.cost)}`),
+		row(
+			"Skipped",
+			`${formatNumber(workload.skippedByLimit)} by limits, ${formatNumber(workload.skippedByCost)} by cost`,
+		),
+		"",
+		"Outputs",
 		...languageLines,
+		"",
+		"No translations were written.",
 		"Estimate note: token and cost numbers are local planning estimates only.",
 	].join("\n");
 }
