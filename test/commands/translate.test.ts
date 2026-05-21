@@ -110,6 +110,23 @@ describe("polypot translate", () => {
 		expect(error).to.not.equal(undefined);
 	});
 
+	it("rejects an invalid --max-cost value", async () => {
+		const { error } = await runCommand([
+			"translate",
+			"-l",
+			"fr_FR",
+			"-p",
+			"foo.pot",
+			"--max-cost",
+			"not-a-number",
+		]);
+
+		expect(error).to.not.equal(undefined);
+		expect(error?.message).to.include(
+			"--max-cost must be a non-negative number",
+		);
+	});
+
 	it("renders a UI-only translation preview with per-language progress", async () => {
 		const { stdout, error } = await runCommand([
 			"translate",
@@ -160,6 +177,30 @@ describe("polypot translate", () => {
 		expect(result.summary).to.include(
 			"Translation logic is not implemented yet.",
 		);
+	});
+
+	it("keeps JSON language results in requested order", async () => {
+		const { stdout, error } = await runCommand([
+			"translate",
+			"--json",
+			"-l",
+			"fr_FR,es_ES,de_DE",
+			"-p",
+			"foo.pot",
+			"-j",
+			"3",
+			"--dry-run",
+		]);
+		const result = JSON.parse(stdout) as {
+			readonly results: readonly {
+				readonly language: string;
+			}[];
+		};
+
+		expect(error).to.equal(undefined);
+		expect(
+			result.results.map((language) => language.language),
+		).to.deep.equal(["fr_FR", "es_ES", "de_DE"]);
 	});
 
 	it("explains missing target languages without starting work", async () => {

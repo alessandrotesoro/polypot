@@ -11,35 +11,38 @@ const PROGRESS_BAR_SIZE = 24;
 const PREVIEW_BATCHES = 3;
 const PREVIEW_STEP_DELAY_MS = 650;
 
-interface TranslateUiPlan {
+interface TranslateUiPreviewOptions {
 	readonly batchSize: number;
 	readonly dryRun: boolean;
-	readonly forceTranslate: boolean;
 	readonly jobs: number;
 	readonly languages: readonly string[];
 	readonly maxCost?: number;
 	readonly maxStringsPerJob?: number;
-	readonly model: string;
 	readonly outputDir: string;
 	readonly outputFormat: string;
-	readonly outputFile?: string;
 	readonly poFilePrefix?: string;
-	readonly potFilePath?: string;
-	readonly provider: string;
 	readonly sourceLanguage: string;
 	readonly verboseLevel: number;
 }
 
-interface LanguagePreviewResult {
+interface TranslateConfigSnapshot {
+	readonly forceTranslate: boolean;
+	readonly model: string;
+	readonly potFilePath?: string;
+	readonly provider: string;
+}
+
+interface TranslateUiPlan {
+	readonly config: TranslateConfigSnapshot;
+	readonly preview: TranslateUiPreviewOptions;
+}
+
+export interface LanguagePreviewResult {
 	readonly batches: number;
 	readonly language: string;
 	readonly outputFile: string;
 	readonly strings: number;
 	readonly translated: number;
-}
-
-interface TranslateUiContext {
-	results: LanguagePreviewResult[];
 }
 
 export interface TranslateUiResult {
@@ -83,18 +86,24 @@ function buildProgressBar(value: number, total: number): string {
 /**
  * Keep the UI preview explicit while still showing a realistic batch shape.
  */
-function getPreviewStringCount(plan: TranslateUiPlan): number {
-	return plan.maxStringsPerJob ?? plan.batchSize * PREVIEW_BATCHES;
+function getPreviewStringCount(preview: TranslateUiPreviewOptions): number {
+	return preview.maxStringsPerJob ?? preview.batchSize * PREVIEW_BATCHES;
 }
 
-function getPreviewBatchCount(plan: TranslateUiPlan): number {
-	return Math.max(1, Math.ceil(getPreviewStringCount(plan) / plan.batchSize));
+function getPreviewBatchCount(preview: TranslateUiPreviewOptions): number {
+	return Math.max(
+		1,
+		Math.ceil(getPreviewStringCount(preview) / preview.batchSize),
+	);
 }
 
-function getOutputFile(plan: TranslateUiPlan, language: string): string {
+function getOutputFile(
+	preview: TranslateUiPreviewOptions,
+	language: string,
+): string {
 	return path.join(
-		plan.outputDir,
-		`${plan.poFilePrefix ?? ""}${language}.po`,
+		preview.outputDir,
+		`${preview.poFilePrefix ?? ""}${language}.po`,
 	);
 }
 
@@ -103,7 +112,7 @@ function formatCurrency(value: number): string {
 }
 
 function formatLanguageTitle(
-	plan: TranslateUiPlan,
+	preview: TranslateUiPreviewOptions,
 	language: string,
 	processed: number,
 	total: number,
@@ -112,23 +121,27 @@ function formatLanguageTitle(
 ): string {
 	const percentage = total > 0 ? Math.round((processed / total) * 100) : 0;
 	const costText =
-		plan.maxCost === undefined
+		preview.maxCost === undefined
 			? "cost tracking: preview"
-			: `cost limit: ${formatCurrency(plan.maxCost)}`;
-	const modeText = plan.dryRun ? "dry run" : "UI preview";
+			: `cost limit: ${formatCurrency(preview.maxCost)}`;
+	const modeText = preview.dryRun ? "dry run" : "UI preview";
 
 	return [
 		`${language} ${buildProgressBar(processed, total)} ${percentage}% (${processed}/${total} strings)`,
-		`source: ${plan.sourceLanguage} | batch ${batch}/${totalBatches} | ${modeText}`,
-		`${costText} | output: ${getOutputFile(plan, language)}`,
+		`source: ${preview.sourceLanguage} | batch ${batch}/${totalBatches} | ${modeText}`,
+		`${costText} | output: ${getOutputFile(preview, language)}`,
 	].join("\n");
 }
 
-function getRenderer(plan: TranslateUiPlan): ListrRendererValue {
-	if (plan.outputFormat === "json") return "silent";
-	if (plan.verboseLevel === 0) return "silent";
+function getRenderer(preview: TranslateUiPreviewOptions): ListrRendererValue {
+	if (preview.outputFormat === "json") return "silent";
+	if (preview.verboseLevel === 0) return "silent";
 
 	return process.stdout.isTTY ? "default" : "verbose";
+}
+
+function getPreviewStepDelayMs(renderer: ListrRendererValue): number {
+	return renderer === "default" ? PREVIEW_STEP_DELAY_MS : 0;
 }
 
 function delay(ms: number): Promise<void> {
@@ -138,48 +151,63 @@ function delay(ms: number): Promise<void> {
 }
 
 function buildLanguageTask(
-	plan: TranslateUiPlan,
+	preview: TranslateUiPreviewOptions,
 	language: string,
-): ListrTask<TranslateUiContext> {
-	const totalStrings = getPreviewStringCount(plan);
-	const totalBatches = getPreviewBatchCount(plan);
+	stepDelayMs: number,
+): ListrTask {
+	const totalStrings = getPreviewStringCount(preview);
+	const totalBatches = getPreviewBatchCount(preview);
 
 	return {
 		title: formatLanguageTitle(
-			plan,
+			preview,
 			language,
 			0,
 			totalStrings,
 			1,
 			totalBatches,
 		),
-		task: async (ctx, task): Promise<void> => {
+		task: async (_ctx, task): Promise<void> => {
 			for (let batch = 1; batch <= totalBatches; batch += 1) {
 				const processed = Math.min(
-					batch * plan.batchSize,
+					batch * preview.batchSize,
 					totalStrings,
 				);
 				task.title = formatLanguageTitle(
-					plan,
+					preview,
 					language,
 					processed,
 					totalStrings,
 					batch,
 					totalBatches,
 				);
-				await delay(PREVIEW_STEP_DELAY_MS);
+				if (stepDelayMs > 0) await delay(stepDelayMs);
 			}
 
-			ctx.results.push({
-				batches: totalBatches,
-				language,
-				outputFile: getOutputFile(plan, language),
-				strings: totalStrings,
-				translated: 0,
-			});
 			task.title = `${language} ${buildProgressBar(totalStrings, totalStrings)} 100% (${totalStrings}/${totalStrings} strings) | preview complete, no translations written`;
 		},
 	};
+}
+
+function buildLanguageResult(
+	preview: TranslateUiPreviewOptions,
+	language: string,
+): LanguagePreviewResult {
+	return {
+		batches: getPreviewBatchCount(preview),
+		language,
+		outputFile: getOutputFile(preview, language),
+		strings: getPreviewStringCount(preview),
+		translated: 0,
+	};
+}
+
+function buildLanguageResults(
+	preview: TranslateUiPreviewOptions,
+): readonly LanguagePreviewResult[] {
+	return preview.languages.map((language) =>
+		buildLanguageResult(preview, language),
+	);
 }
 
 function buildSummary(result: TranslateUiResult): string {
@@ -197,30 +225,31 @@ function buildSummary(result: TranslateUiResult): string {
 export async function runTranslateUiPreview(
 	plan: TranslateUiPlan,
 ): Promise<TranslateUiResult> {
+	const { config, preview } = plan;
 	const baseResult = {
 		implemented: false,
 		mode: "ui-preview",
 		plan: {
-			batchSize: plan.batchSize,
-			dryRun: plan.dryRun,
-			forceTranslate: plan.forceTranslate,
-			jobs: plan.jobs,
-			languages: plan.languages,
-			...(plan.maxCost !== undefined && { maxCost: plan.maxCost }),
-			...(plan.maxStringsPerJob !== undefined && {
-				maxStringsPerJob: plan.maxStringsPerJob,
+			batchSize: preview.batchSize,
+			dryRun: preview.dryRun,
+			forceTranslate: config.forceTranslate,
+			jobs: preview.jobs,
+			languages: preview.languages,
+			...(preview.maxCost !== undefined && { maxCost: preview.maxCost }),
+			...(preview.maxStringsPerJob !== undefined && {
+				maxStringsPerJob: preview.maxStringsPerJob,
 			}),
-			model: plan.model,
-			outputDir: plan.outputDir,
-			...(plan.potFilePath !== undefined && {
-				potFilePath: plan.potFilePath,
+			model: config.model,
+			outputDir: preview.outputDir,
+			...(config.potFilePath !== undefined && {
+				potFilePath: config.potFilePath,
 			}),
-			provider: plan.provider,
-			sourceLanguage: plan.sourceLanguage,
+			provider: config.provider,
+			sourceLanguage: preview.sourceLanguage,
 		},
 	} as const;
 
-	if (plan.languages.length === 0) {
+	if (preview.languages.length === 0) {
 		return {
 			...baseResult,
 			results: [],
@@ -230,13 +259,31 @@ export async function runTranslateUiPreview(
 		};
 	}
 
-	const context: TranslateUiContext = { results: [] };
-	const tasks = plan.languages.map((language) =>
-		buildLanguageTask(plan, language),
+	const renderer = getRenderer(preview);
+	const results = buildLanguageResults(preview);
+	if (renderer === "silent") {
+		const result: TranslateUiResult = {
+			...baseResult,
+			results,
+			status: "previewed",
+			summary: "",
+		};
+
+		return {
+			...result,
+			summary: buildSummary(result),
+		};
+	}
+
+	const stepDelayMs = getPreviewStepDelayMs(renderer);
+	const tasks = preview.languages.map((language) =>
+		buildLanguageTask(preview, language, stepDelayMs),
 	);
-	const renderer = getRenderer(plan);
 	const runnerOptions = {
-		concurrent: Math.max(1, Math.min(plan.jobs, plan.languages.length)),
+		concurrent: Math.max(
+			1,
+			Math.min(preview.jobs, preview.languages.length),
+		),
 		exitOnError: false,
 		renderer,
 		rendererOptions:
@@ -244,21 +291,20 @@ export async function runTranslateUiPreview(
 				? { logTitleChange: true }
 				: { collapseErrors: false, formatOutput: "wrap" },
 	} satisfies ListrBaseClassOptions<
-		TranslateUiContext,
+		unknown,
 		ListrRendererValue,
 		ListrRendererValue
 	>;
-	const runner = new Listr<
-		TranslateUiContext,
-		ListrRendererValue,
-		ListrRendererValue
-	>(tasks, runnerOptions);
+	const runner = new Listr<unknown, ListrRendererValue, ListrRendererValue>(
+		tasks,
+		runnerOptions,
+	);
 
-	await runner.run(context);
+	await runner.run();
 
 	const result: TranslateUiResult = {
 		...baseResult,
-		results: context.results,
+		results,
 		status: "previewed",
 		summary: "",
 	};

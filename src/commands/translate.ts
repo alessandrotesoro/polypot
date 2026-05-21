@@ -250,50 +250,50 @@ each target language.
 		const usesJsonStdout =
 			this.jsonEnabled() ||
 			(outputFormat === "json" && outputFile === undefined);
+		const maxCost = this.resolveMaxCost();
 		const poFilePrefix =
 			this.flags["po-file-prefix"] ?? this.appConfig.output.poFilePrefix;
 		const potFilePath =
 			this.flags["pot-file-path"] ?? this.appConfig.source.potFilePath;
 		const result = await runTranslateUiPreview({
-			batchSize:
-				this.flags["batch-size"] ??
-				this.appConfig.performance.batchSize,
-			dryRun: this.flags["dry-run"] ?? this.appConfig.debug.dryRun,
-			forceTranslate:
-				this.flags["force-translate"] ??
-				this.appConfig.behavior.forceTranslate,
-			jobs: this.flags.jobs ?? this.appConfig.performance.jobs,
-			languages:
-				this.flags["target-languages"] ??
-				this.appConfig.source.targetLanguages,
-			...(this.flags["max-cost"] !== undefined && {
-				maxCost: Number.parseFloat(this.flags["max-cost"]),
-			}),
-			...(this.flags["max-cost"] === undefined &&
-				this.appConfig.limits.maxCost !== undefined && {
-					maxCost: this.appConfig.limits.maxCost,
+			config: {
+				forceTranslate:
+					this.flags["force-translate"] ??
+					this.appConfig.behavior.forceTranslate,
+				model: this.flags.model ?? this.appConfig.provider.model,
+				...(potFilePath !== undefined && { potFilePath }),
+				provider:
+					this.flags.provider ?? this.appConfig.provider.provider,
+			},
+			preview: {
+				batchSize:
+					this.flags["batch-size"] ??
+					this.appConfig.performance.batchSize,
+				dryRun: this.flags["dry-run"] ?? this.appConfig.debug.dryRun,
+				jobs: this.flags.jobs ?? this.appConfig.performance.jobs,
+				languages:
+					this.flags["target-languages"] ??
+					this.appConfig.source.targetLanguages,
+				...(maxCost !== undefined && { maxCost }),
+				...(this.flags["max-strings-per-job"] !== undefined && {
+					maxStringsPerJob: this.flags["max-strings-per-job"],
 				}),
-			...(this.flags["max-strings-per-job"] !== undefined && {
-				maxStringsPerJob: this.flags["max-strings-per-job"],
-			}),
-			...(this.flags["max-strings-per-job"] === undefined &&
-				this.appConfig.limits.maxStringsPerJob !== undefined && {
-					maxStringsPerJob: this.appConfig.limits.maxStringsPerJob,
-				}),
-			model: this.flags.model ?? this.appConfig.provider.model,
-			outputDir:
-				this.flags["output-dir"] ?? this.appConfig.output.outputDir,
-			outputFormat: usesJsonStdout ? "json" : outputFormat,
-			...(outputFile !== undefined && { outputFile }),
-			...(poFilePrefix !== undefined && { poFilePrefix }),
-			...(potFilePath !== undefined && { potFilePath }),
-			provider: this.flags.provider ?? this.appConfig.provider.provider,
-			sourceLanguage:
-				this.flags["source-language"] ??
-				this.appConfig.source.sourceLanguage,
-			verboseLevel:
-				this.flags["verbose-level"] ??
-				this.appConfig.debug.verboseLevel,
+				...(this.flags["max-strings-per-job"] === undefined &&
+					this.appConfig.limits.maxStringsPerJob !== undefined && {
+						maxStringsPerJob:
+							this.appConfig.limits.maxStringsPerJob,
+					}),
+				outputDir:
+					this.flags["output-dir"] ?? this.appConfig.output.outputDir,
+				outputFormat: usesJsonStdout ? "json" : outputFormat,
+				...(poFilePrefix !== undefined && { poFilePrefix }),
+				sourceLanguage:
+					this.flags["source-language"] ??
+					this.appConfig.source.sourceLanguage,
+				verboseLevel:
+					this.flags["verbose-level"] ??
+					this.appConfig.debug.verboseLevel,
+			},
 		});
 
 		if (!this.jsonEnabled()) {
@@ -310,5 +310,19 @@ each target language.
 		}
 
 		return result;
+	}
+
+	private resolveMaxCost(): number | undefined {
+		if (this.flags["max-cost"] === undefined)
+			return this.appConfig.limits.maxCost;
+
+		const maxCost = Number.parseFloat(this.flags["max-cost"]);
+		if (!Number.isFinite(maxCost) || maxCost < 0) {
+			this.error("--max-cost must be a non-negative number.", {
+				exit: 1,
+			});
+		}
+
+		return maxCost;
 	}
 }
