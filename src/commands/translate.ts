@@ -1,11 +1,9 @@
 import { Flags } from "@oclif/core";
 import { BaseCommand } from "../base-command.js";
 import { DEFAULT_OPENAI_MODEL } from "../config/schema.js";
-import { polypotEnv, STUB } from "../flag-helpers.js";
+import { polypotEnv } from "../flag-helpers.js";
+import { runTranslateUiPreview } from "../translate/ui.js";
 
-/**
- * Print translate inputs until translation is implemented.
- */
 export default class Translate extends BaseCommand<typeof Translate> {
 	static override summary =
 		"Translate a .pot file into one or more languages using AI";
@@ -245,12 +243,72 @@ each target language.
 	 * @returns A promise for the result.
 	 */
 	public async run(): Promise<unknown> {
-		const result = {
-			stub: `${STUB} translate not implemented`,
-			flags: this.flags,
-			appConfig: this.appConfig,
-		};
-		this.log(JSON.stringify(result, null, 2));
+		const outputFormat =
+			this.flags["output-format"] ?? this.appConfig.output.outputFormat;
+		const outputFile =
+			this.flags["output-file"] ?? this.appConfig.output.outputFile;
+		const usesJsonStdout =
+			this.jsonEnabled() ||
+			(outputFormat === "json" && outputFile === undefined);
+		const poFilePrefix =
+			this.flags["po-file-prefix"] ?? this.appConfig.output.poFilePrefix;
+		const potFilePath =
+			this.flags["pot-file-path"] ?? this.appConfig.source.potFilePath;
+		const result = await runTranslateUiPreview({
+			batchSize:
+				this.flags["batch-size"] ??
+				this.appConfig.performance.batchSize,
+			dryRun: this.flags["dry-run"] ?? this.appConfig.debug.dryRun,
+			forceTranslate:
+				this.flags["force-translate"] ??
+				this.appConfig.behavior.forceTranslate,
+			jobs: this.flags.jobs ?? this.appConfig.performance.jobs,
+			languages:
+				this.flags["target-languages"] ??
+				this.appConfig.source.targetLanguages,
+			...(this.flags["max-cost"] !== undefined && {
+				maxCost: Number.parseFloat(this.flags["max-cost"]),
+			}),
+			...(this.flags["max-cost"] === undefined &&
+				this.appConfig.limits.maxCost !== undefined && {
+					maxCost: this.appConfig.limits.maxCost,
+				}),
+			...(this.flags["max-strings-per-job"] !== undefined && {
+				maxStringsPerJob: this.flags["max-strings-per-job"],
+			}),
+			...(this.flags["max-strings-per-job"] === undefined &&
+				this.appConfig.limits.maxStringsPerJob !== undefined && {
+					maxStringsPerJob: this.appConfig.limits.maxStringsPerJob,
+				}),
+			model: this.flags.model ?? this.appConfig.provider.model,
+			outputDir:
+				this.flags["output-dir"] ?? this.appConfig.output.outputDir,
+			outputFormat: usesJsonStdout ? "json" : outputFormat,
+			...(outputFile !== undefined && { outputFile }),
+			...(poFilePrefix !== undefined && { poFilePrefix }),
+			...(potFilePath !== undefined && { potFilePath }),
+			provider: this.flags.provider ?? this.appConfig.provider.provider,
+			sourceLanguage:
+				this.flags["source-language"] ??
+				this.appConfig.source.sourceLanguage,
+			verboseLevel:
+				this.flags["verbose-level"] ??
+				this.appConfig.debug.verboseLevel,
+		});
+
+		if (!this.jsonEnabled()) {
+			if (outputFormat === "json" && outputFile === undefined) {
+				this.log(JSON.stringify(result, null, 2));
+			} else {
+				this.log(result.summary);
+				if (outputFile !== undefined) {
+					this.log(
+						`JSON output file requested: ${outputFile} (not written in UI preview mode).`,
+					);
+				}
+			}
+		}
+
 		return result;
 	}
 }

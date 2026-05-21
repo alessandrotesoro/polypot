@@ -66,6 +66,7 @@ describe("polypot translate", () => {
 	it("parses comma-separated --target-languages and short flags", async () => {
 		const { stdout, error } = await runCommand([
 			"translate",
+			"--json",
 			"-l",
 			"fr_FR,es_ES",
 			"-p",
@@ -78,12 +79,24 @@ describe("polypot translate", () => {
 			"2",
 			"--dry-run",
 		]);
+		const result = JSON.parse(stdout) as {
+			readonly implemented: boolean;
+			readonly mode: string;
+			readonly plan: {
+				readonly batchSize: number;
+				readonly dryRun: boolean;
+				readonly languages: readonly string[];
+			};
+			readonly status: string;
+		};
+
 		expect(error).to.equal(undefined);
-		expect(stdout).to.include('"target-languages"');
-		expect(stdout).to.include("fr_FR");
-		expect(stdout).to.include("es_ES");
-		expect(stdout).to.include('"batch-size": 30');
-		expect(stdout).to.include('"dry-run": true');
+		expect(result.implemented).to.equal(false);
+		expect(result.mode).to.equal("ui-preview");
+		expect(result.status).to.equal("previewed");
+		expect(result.plan.languages).to.deep.equal(["fr_FR", "es_ES"]);
+		expect(result.plan.batchSize).to.equal(30);
+		expect(result.plan.dryRun).to.equal(true);
 	});
 
 	it("rejects an invalid --output-format enum value", async () => {
@@ -97,18 +110,68 @@ describe("polypot translate", () => {
 		expect(error).to.not.equal(undefined);
 	});
 
-	it("exposes the resolved appConfig defaults in stub output", async () => {
+	it("renders a UI-only translation preview with per-language progress", async () => {
+		const { stdout, error } = await runCommand([
+			"translate",
+			"-l",
+			"fr_FR",
+			"-p",
+			"foo.pot",
+			"--batch-size",
+			"20",
+			"--dry-run",
+			"--verbose-level",
+			"2",
+		]);
+
+		expect(error).to.equal(undefined);
+		expect(stdout).to.include("fr_FR");
+		expect(stdout).to.include("------------------------ 0% (0/60 strings)");
+		expect(stdout).to.include(
+			"######################## 100% (60/60 strings)",
+		);
+		expect(stdout).to.include("preview complete, no translations written");
+		expect(stdout).to.include("Translation logic is not implemented yet.");
+	});
+
+	it("exposes the resolved appConfig defaults in JSON output", async () => {
+		const { stdout, error } = await runCommand([
+			"translate",
+			"--json",
+			"-l",
+			"fr_FR",
+			"-p",
+			"foo.pot",
+			"--dry-run",
+		]);
+		const result = JSON.parse(stdout) as {
+			readonly plan: {
+				readonly batchSize: number;
+				readonly provider: string;
+			};
+			readonly status: string;
+			readonly summary: string;
+		};
+
+		expect(error).to.equal(undefined);
+		expect(result.status).to.equal("previewed");
+		expect(result.plan.provider).to.equal("openai");
+		expect(result.plan.batchSize).to.equal(20);
+		expect(result.summary).to.include(
+			"Translation logic is not implemented yet.",
+		);
+	});
+
+	it("explains missing target languages without starting work", async () => {
 		const { stdout, error } = await runCommand([
 			"translate",
 			"-p",
 			"foo.pot",
 			"--dry-run",
 		]);
+
 		expect(error).to.equal(undefined);
-		expect(stdout).to.include("[stub] translate not implemented");
-		expect(stdout).to.include('"appConfig"');
-		expect(stdout).to.include('"openai"');
-		expect(stdout).to.include('"batchSize": 20');
+		expect(stdout).to.include("No target languages are configured");
 	});
 
 	it("loads project config overrides from the current working directory", async () => {
@@ -127,15 +190,23 @@ describe("polypot translate", () => {
 
 			const { stdout, error } = await runCommand([
 				"translate",
+				"--json",
 				"-p",
 				"foo.pot",
 				"--dry-run",
 			]);
+			const result = JSON.parse(stdout) as {
+				readonly plan: {
+					readonly languages: readonly string[];
+					readonly model: string;
+					readonly sourceLanguage: string;
+				};
+			};
 
 			expect(error).to.equal(undefined);
-			expect(stdout).to.include('"model": "project-model"');
-			expect(stdout).to.include('"sourceLanguage": "it_IT"');
-			expect(stdout).to.include('"fr_FR"');
+			expect(result.plan.model).to.equal("project-model");
+			expect(result.plan.sourceLanguage).to.equal("it_IT");
+			expect(result.plan.languages).to.deep.equal(["fr_FR"]);
 		} finally {
 			process.chdir(previousCwd);
 			await fs.rm(projectDir, { recursive: true, force: true });
