@@ -362,6 +362,48 @@ describe("polypot translate", () => {
 		}
 	});
 
+	it("writes --output-file before writing debug output", async () => {
+		const previousCwd = process.cwd();
+		const projectDir = await fs.mkdtemp(
+			path.join(os.tmpdir(), "polypot-translate-debug-failure-"),
+		);
+		tempDirs.push(projectDir);
+		const potFile = path.join(projectDir, "messages.pot");
+		const outputFile = path.join(projectDir, "preview.json");
+		await fs.writeFile(potFile, POT_FIXTURE);
+		await fs.mkdir(path.join(projectDir, ".polypot"));
+		await fs.writeFile(path.join(projectDir, ".polypot", "debug"), "");
+
+		try {
+			process.chdir(projectDir);
+			const { error } = await runCommand([
+				"translate",
+				"-l",
+				"fr_FR",
+				"-p",
+				potFile,
+				"--output-format",
+				"json",
+				"--output-file",
+				outputFile,
+				"--save-debug-info",
+				"--dry-run",
+			]);
+			const output = JSON.parse(
+				await fs.readFile(outputFile, "utf8"),
+			) as {
+				readonly debugOutputFile: string;
+				readonly status: string;
+			};
+
+			expect(error).to.not.equal(undefined);
+			expect(output.status).to.equal("previewed");
+			expect(output.debugOutputFile).to.include(".polypot/debug");
+		} finally {
+			process.chdir(previousCwd);
+		}
+	});
+
 	it("suppresses human success output at --verbose-level 0", async () => {
 		const potFile = await writePotFixture();
 		const { stdout, error } = await runCommand([
@@ -611,6 +653,101 @@ describe("polypot translate", () => {
 		expect(stdout).to.include("No target languages are configured");
 	});
 
+	it("returns structured JSON when the POT file cannot be read", async () => {
+		const missingPotFile = path.join(
+			os.tmpdir(),
+			"polypot-missing-messages.pot",
+		);
+		const { stdout, error } = await runCommand([
+			"translate",
+			"--json",
+			"-l",
+			"fr_FR",
+			"-p",
+			missingPotFile,
+			"--dry-run",
+		]);
+		const result = JSON.parse(stdout) as {
+			readonly error: {
+				readonly code: string;
+				readonly potFilePath: string;
+			};
+			readonly results: readonly unknown[];
+			readonly status: string;
+			readonly summary: string;
+		};
+
+		expect(error).to.equal(undefined);
+		expect(result.status).to.equal("blocked");
+		expect(result.results).to.deep.equal([]);
+		expect(result.error.code).to.equal("pot_analysis_failed");
+		expect(result.error.potFilePath).to.equal(missingPotFile);
+		expect(result.summary).to.include("Cannot read or parse POT file");
+	});
+
+	it("writes structured output when the POT file cannot be parsed", async () => {
+		const tempDir = await fs.mkdtemp(
+			path.join(os.tmpdir(), "polypot-translate-malformed-"),
+		);
+		tempDirs.push(tempDir);
+		const potFile = path.join(tempDir, "messages.pot");
+		const outputFile = path.join(tempDir, "preview.json");
+		await fs.writeFile(potFile, "\0\0");
+
+		const { error } = await runCommand([
+			"translate",
+			"-l",
+			"fr_FR",
+			"-p",
+			potFile,
+			"--output-format",
+			"json",
+			"--output-file",
+			outputFile,
+			"--dry-run",
+		]);
+		const result = JSON.parse(await fs.readFile(outputFile, "utf8")) as {
+			readonly error: {
+				readonly code: string;
+				readonly potFilePath: string;
+			};
+			readonly status: string;
+		};
+
+		expect(error).to.equal(undefined);
+		expect(result.status).to.equal("blocked");
+		expect(result.error).to.deep.include({
+			code: "pot_analysis_failed",
+			potFilePath: potFile,
+		});
+	});
+
+	it("strips terminal controls from human path output", async () => {
+		const tempDir = await fs.mkdtemp(
+			path.join(os.tmpdir(), "polypot-translate-ansi-"),
+		);
+		tempDirs.push(tempDir);
+		const potFile = path.join(tempDir, "messages\u001B[31m.pot");
+		const outputFile = path.join(tempDir, "preview\u001B[31m.json");
+		await fs.writeFile(potFile, POT_FIXTURE);
+
+		const { stdout, error } = await runCommand([
+			"translate",
+			"-l",
+			"fr_FR",
+			"-p",
+			potFile,
+			"--output-file",
+			outputFile,
+			"--dry-run",
+		]);
+
+		expect(error).to.equal(undefined);
+		expect(stdout).to.include("messages.pot");
+		expect(stdout).to.include("preview.json");
+		expect(stdout).not.to.include("\u001B[31m");
+	});
+
 	it("loads project config overrides from the current working directory", async () => {
 		const previousCwd = process.cwd();
 		const projectDir = await fs.mkdtemp(
@@ -648,6 +785,54 @@ describe("polypot translate", () => {
 		} finally {
 			process.chdir(previousCwd);
 			await fs.rm(projectDir, { recursive: true, force: true });
+		}
+	});
+
+	it("resolves relative POT paths from an explicit project config file", async () => {
+		const previousCwd = process.cwd();
+		const projectDir = await fs.mkdtemp(
+			path.join(os.tmpdir(), "polypot-translate-config-path-"),
+		);
+		const otherDir = await fs.mkdtemp(
+			path.join(os.tmpdir(), "polypot-translate-other-cwd-"),
+		);
+
+		try {
+			await fs.mkdir(path.join(projectDir, ".polypot"));
+			await fs.writeFile(
+				path.join(projectDir, "messages.pot"),
+				POT_FIXTURE,
+			);
+			const configPath = path.join(projectDir, ".polypot", "config.yaml");
+			await fs.writeFile(
+				configPath,
+				"source:\n  potFilePath: messages.pot\n  targetLanguages:\n    - fr_FR\n",
+			);
+			process.chdir(otherDir);
+
+			const { stdout, error } = await runCommand([
+				"translate",
+				"--json",
+				"--config",
+				configPath,
+				"--dry-run",
+			]);
+			const result = JSON.parse(stdout) as {
+				readonly analysis: {
+					readonly filePath: string;
+				};
+				readonly status: string;
+			};
+
+			expect(error).to.equal(undefined);
+			expect(result.status).to.equal("previewed");
+			expect(result.analysis.filePath).to.equal(
+				path.join(projectDir, "messages.pot"),
+			);
+		} finally {
+			process.chdir(previousCwd);
+			await fs.rm(projectDir, { recursive: true, force: true });
+			await fs.rm(otherDir, { recursive: true, force: true });
 		}
 	});
 });

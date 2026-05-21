@@ -6,6 +6,7 @@ import {
 	type ListrRendererValue,
 	type ListrTask,
 } from "listr2";
+import { sanitizeTerminalText } from "../terminal.js";
 import {
 	analyzePotFile,
 	type PotAnalysis,
@@ -146,6 +147,11 @@ export interface TranslateUiResult {
 		readonly sourceCharacters: number;
 		readonly totalStrings: number;
 	};
+	readonly error?: {
+		readonly code: "pot_analysis_failed";
+		readonly message: string;
+		readonly potFilePath: string;
+	};
 	readonly implemented: false;
 	readonly mode: "ui-preview";
 	readonly plan: {
@@ -208,6 +214,10 @@ function formatDuration(ms: number): string {
 	return remainingSeconds === 0
 		? `${minutes}m`
 		: `${minutes}m ${remainingSeconds}s`;
+}
+
+function formatError(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
 }
 
 function estimateSourceCharacters(
@@ -413,7 +423,7 @@ function formatLanguageTitle(
 		`${plan.language} ${buildProgressBar(processed, plan.plannedStrings)} ${percentage}% (${processed}/${plan.plannedStrings} strings)`,
 		`phase: ${phase} | elapsed ${formatDuration(elapsedMs)} | eta ${formatDuration(etaMs)} | ${modeText}`,
 		`tokens ~${plan.estimate.totalTokens} | cost ~${formatCurrency(plan.estimate.cost)} | skipped ${plan.skippedByLimit + plan.skippedByCost}`,
-		`limits: ${formatLimits(preview)} | output: ${plan.outputFile}`,
+		`limits: ${formatLimits(preview)} | output: ${sanitizeTerminalText(plan.outputFile)}`,
 	].join("\n");
 }
 
@@ -493,7 +503,7 @@ function buildPreflight(
 
 	return [
 		"Translate preview",
-		`Source: ${analysis.filePath} (${analysis.totalStrings} strings, ${analysis.pluralStrings} plural, ${analysis.contextStrings} with context, ${analysis.fuzzyStrings} fuzzy)`,
+		`Source: ${sanitizeTerminalText(analysis.filePath)} (${analysis.totalStrings} strings, ${analysis.pluralStrings} plural, ${analysis.contextStrings} with context, ${analysis.fuzzyStrings} fuzzy)`,
 		`Targets: ${preview.languages.join(", ")} | Jobs: ${getConcurrentJobs(preview)} | Batch size: ${preview.batchSize}`,
 		`Plan: ${workload.plannedStrings}/${workload.sourceStrings} strings, ${workload.batches} batches | Limits: ${formatLimits(preview)}`,
 		`Estimate: ~${workload.estimate.totalTokens} tokens, ~${formatCurrency(workload.estimate.cost)} | No API calls or .po files will be written.`,
@@ -504,7 +514,7 @@ function buildPreflight(
 function buildSummaryFromWorkload(workload: TranslatePreviewWorkload): string {
 	const languageLines = workload.languages.map(
 		(language) =>
-			`- ${language.language}: ${language.plannedStrings}/${language.sourceStrings} strings, ${language.batches} batches, ~${language.estimate.totalTokens} tokens, ~${formatCurrency(language.estimate.cost)}, output ${language.outputFile}`,
+			`- ${language.language}: ${language.plannedStrings}/${language.sourceStrings} strings, ${language.batches} batches, ~${language.estimate.totalTokens} tokens, ~${formatCurrency(language.estimate.cost)}, output ${sanitizeTerminalText(language.outputFile)}`,
 	);
 
 	return [
@@ -578,7 +588,25 @@ export async function runTranslateUiPreview(
 	}
 
 	const renderer = getRenderer(preview);
-	const analysis = await analyzePotFile(config.potFilePath);
+	let analysis: PotAnalysis;
+	try {
+		analysis = await analyzePotFile(config.potFilePath);
+	} catch (error) {
+		const message = formatError(error);
+
+		return {
+			...baseResult,
+			error: {
+				code: "pot_analysis_failed",
+				message,
+				potFilePath: config.potFilePath,
+			},
+			results: [],
+			status: "blocked",
+			summary: `Cannot read or parse POT file at ${sanitizeTerminalText(config.potFilePath)}: ${sanitizeTerminalText(message)}`,
+		};
+	}
+
 	const workload = buildWorkload(preview, analysis);
 	const results = workload.languages.map(buildLanguageResult);
 	const result: TranslateUiResult = {

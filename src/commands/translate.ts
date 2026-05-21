@@ -8,10 +8,18 @@ import {
 	isSafeLanguageValue,
 	LANGUAGE_VALUE_ERROR,
 } from "../language-values.js";
+import { sanitizeTerminalText } from "../terminal.js";
 import {
 	runTranslateUiPreview,
 	type TranslateSettingsSnapshot,
 } from "../translate/ui.js";
+
+function getExplicitConfigProjectDirectory(configPath: string): string {
+	const configDirectory = path.resolve(path.dirname(configPath));
+	return path.basename(configDirectory) === ".polypot"
+		? path.dirname(configDirectory)
+		: configDirectory;
+}
 
 export default class Translate extends BaseCommand<typeof Translate> {
 	static override summary =
@@ -284,8 +292,7 @@ each target language.
 		);
 		const poFilePrefix =
 			this.flags["po-file-prefix"] ?? this.appConfig.output.poFilePrefix;
-		const potFilePath =
-			this.flags["pot-file-path"] ?? this.appConfig.source.potFilePath;
+		const potFilePath = this.resolvePotFilePath();
 		const verboseLevel =
 			this.flags["verbose-level"] ?? this.appConfig.debug.verboseLevel;
 		const languages = this.resolveTargetLanguages();
@@ -331,7 +338,7 @@ each target language.
 			},
 		});
 
-		const debugOutputFile = await this.writeDebugOutputIfRequested(result);
+		const debugOutputFile = this.getDebugOutputFileIfRequested();
 		const finalResult =
 			debugOutputFile === undefined
 				? result
@@ -341,16 +348,24 @@ each target language.
 			await this.writeJsonOutput(outputFile, finalResult);
 		}
 
+		if (debugOutputFile !== undefined) {
+			await this.writeJsonOutput(debugOutputFile, result);
+		}
+
 		if (!this.jsonEnabled()) {
 			if (outputFormat === "json" && outputFile === undefined) {
 				this.log(JSON.stringify(finalResult, null, 2));
 			} else if (verboseLevel > 0) {
 				this.log(result.summary);
 				if (debugOutputFile !== undefined) {
-					this.log(`Debug preview written to: ${debugOutputFile}`);
+					this.log(
+						`Debug preview written to: ${sanitizeTerminalText(debugOutputFile)}`,
+					);
 				}
 				if (outputFile !== undefined) {
-					this.log(`JSON preview written to: ${outputFile}`);
+					this.log(
+						`JSON preview written to: ${sanitizeTerminalText(outputFile)}`,
+					);
 				}
 			}
 		}
@@ -480,22 +495,16 @@ each target language.
 		await fs.writeFile(outputFile, `${JSON.stringify(result, null, 2)}\n`);
 	}
 
-	private async writeDebugOutputIfRequested(
-		result: unknown,
-	): Promise<string | undefined> {
+	private getDebugOutputFileIfRequested(): string | undefined {
 		const saveDebugInfo =
 			this.flags["save-debug-info"] ?? this.appConfig.debug.saveDebugInfo;
 		if (!saveDebugInfo) return undefined;
 
 		const debugDirectory = path.join(process.cwd(), ".polypot", "debug");
-		const debugOutputFile = path.join(
+		return path.join(
 			debugDirectory,
 			`translate-preview-${new Date().toISOString().replaceAll(":", "-")}.json`,
 		);
-
-		await this.writeJsonOutput(debugOutputFile, result);
-
-		return debugOutputFile;
 	}
 
 	private resolveTargetLanguages(): readonly string[] {
@@ -533,6 +542,25 @@ each target language.
 		}
 
 		return languages;
+	}
+
+	private resolvePotFilePath(): string | undefined {
+		if (this.flags["pot-file-path"] !== undefined)
+			return this.flags["pot-file-path"];
+
+		const configuredPath = this.appConfig.source.potFilePath;
+		if (configuredPath === undefined) return undefined;
+		if (
+			this.flags.config === undefined ||
+			path.isAbsolute(configuredPath)
+		) {
+			return configuredPath;
+		}
+
+		return path.join(
+			getExplicitConfigProjectDirectory(this.flags.config),
+			configuredPath,
+		);
 	}
 
 	private resolveBoundedInteger(

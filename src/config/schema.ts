@@ -55,7 +55,7 @@ const PerformanceConfig = z.object({
 
 const LimitsConfig = z.object({
 	maxStringsPerJob: z.number().int().min(1).optional(),
-	maxTotalStrings: z.number().int().optional(),
+	maxTotalStrings: z.number().int().min(1).optional(),
 	maxCost: z.number().min(0).optional(),
 });
 

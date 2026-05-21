@@ -27,6 +27,7 @@ describe("PolypotConfigSchema", () => {
 			{ performance: { jobs: 11 } },
 			{ limits: { maxCost: -1 } },
 			{ limits: { maxStringsPerJob: 0 } },
+			{ limits: { maxTotalStrings: 0 } },
 			{ source: { targetLanguages: ["../escape"] } },
 			{ source: { targetLanguages: ["fr/FR"] } },
 			{ source: { targetLanguages: [""] } },
