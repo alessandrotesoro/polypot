@@ -19,6 +19,7 @@ const PREVIEW_STEP_DELAY_MS = 650;
 const ESTIMATED_CHARS_PER_TOKEN = 4;
 const ESTIMATED_OUTPUT_TOKEN_MULTIPLIER = 1.35;
 const PREVIEW_COST_PER_1000_TOKENS = 0.002;
+const numberFormatter = new Intl.NumberFormat("en-US");
 
 interface TranslateUiPreviewOptions {
 	readonly batchSize: number;
@@ -204,7 +205,7 @@ function formatCurrency(value: number): string {
 }
 
 function formatNumber(value: number): string {
-	return new Intl.NumberFormat("en-US").format(value);
+	return numberFormatter.format(value);
 }
 
 function formatCount(
@@ -215,16 +216,8 @@ function formatCount(
 	return `${formatNumber(value)} ${value === 1 ? singular : plural}`;
 }
 
-function heading(value: string): string {
-	return color.bold(value);
-}
-
-function label(value: string, width = 10): string {
-	return value.padEnd(width);
-}
-
 function row(name: string, value: string, width?: number): string {
-	return `  ${label(name, width)} ${value}`;
+	return `  ${name.padEnd(width ?? 10)} ${value}`;
 }
 
 function formatDuration(ms: number): string {
@@ -426,16 +419,12 @@ function formatLimits(preview: TranslateUiPreviewOptions): string {
 	return limits.length === 0 ? "none" : limits.join(" | ");
 }
 
-function formatHumanPath(value: string): string {
+function formatPath(value: string): string {
 	return sanitizeTerminalText(value);
 }
 
 function formatSourceDetails(analysis: PotAnalysis): string {
 	return `${formatNumber(analysis.pluralStrings)} plural | ${formatNumber(analysis.contextStrings)} context | ${formatNumber(analysis.fuzzyStrings)} fuzzy`;
-}
-
-function formatOutputName(value: string): string {
-	return formatHumanPath(value);
 }
 
 function formatWorkload(workload: TranslatePreviewWorkload): string {
@@ -465,7 +454,7 @@ function formatLanguageTitle(
 		preview.dryRun ? "dry run" : "preview",
 		`~${formatNumber(plan.estimate.totalTokens)} tokens`,
 		`~${formatCurrency(plan.estimate.cost)}`,
-		`output ${formatOutputName(plan.outputFile)}`,
+		`output ${formatPath(plan.outputFile)}`,
 	].join(" | ");
 
 	return [
@@ -523,7 +512,7 @@ function buildLanguageTask(
 				startedAt,
 			);
 			if (stepDelayMs > 0) await delay(stepDelayMs);
-			task.title = `${plan.language}  ${buildProgressBar(plan.plannedStrings, plan.plannedStrings)}  ${formatNumber(plan.plannedStrings)} / ${formatNumber(plan.plannedStrings)}  100%\n  Preview complete | no translations written | output ${formatOutputName(plan.outputFile)}`;
+			task.title = `${plan.language}  ${buildProgressBar(plan.plannedStrings, plan.plannedStrings)}  ${formatNumber(plan.plannedStrings)} / ${formatNumber(plan.plannedStrings)}  100%\n  Preview complete | no translations written | output ${formatPath(plan.outputFile)}`;
 		},
 	};
 }
@@ -549,14 +538,14 @@ function buildPreflight(
 	const analysis = workload.analysis;
 
 	return [
-		heading("Translate preview"),
+		color.bold("Translate preview"),
 		"",
-		heading("Source"),
-		row("File", path.basename(formatHumanPath(analysis.filePath))),
+		color.bold("Source"),
+		row("File", path.basename(formatPath(analysis.filePath))),
 		row("Strings", formatNumber(analysis.totalStrings)),
 		row("Details", formatSourceDetails(analysis)),
 		"",
-		heading("Plan"),
+		color.bold("Plan"),
 		row("Targets", preview.languages.join(", ")),
 		row("Workload", formatWorkload(workload)),
 		row(
@@ -574,7 +563,7 @@ function buildPreflight(
 
 function buildSummaryFromWorkload(workload: TranslatePreviewWorkload): string {
 	const languageLines = workload.languages.map((language) =>
-		row(language.language, formatOutputName(language.outputFile), 9),
+		row(language.language, formatPath(language.outputFile), 9),
 	);
 
 	return [
