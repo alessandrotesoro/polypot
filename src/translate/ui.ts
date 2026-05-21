@@ -210,13 +210,9 @@ function formatDuration(ms: number): string {
 		: `${minutes}m ${remainingSeconds}s`;
 }
 
-function estimateStrings(
-	sourceStrings: readonly PotSourceString[],
+function estimateSourceCharacters(
+	sourceCharacters: number,
 ): TranslationEstimate {
-	const sourceCharacters = sourceStrings.reduce(
-		(total, sourceString) => total + sourceString.characters,
-		0,
-	);
 	const inputTokens = Math.ceil(sourceCharacters / ESTIMATED_CHARS_PER_TOKEN);
 	const outputTokens = Math.ceil(
 		inputTokens * ESTIMATED_OUTPUT_TOKEN_MULTIPLIER,
@@ -231,32 +227,58 @@ function estimateStrings(
 	};
 }
 
-function sumEstimates(
-	plans: readonly Pick<LanguageWorkPlan, "estimate">[],
+function addEstimates(
+	first: TranslationEstimate,
+	second: TranslationEstimate,
 ): TranslationEstimate {
-	return plans.reduce<TranslationEstimate>(
-		(total, plan) => ({
-			cost: total.cost + plan.estimate.cost,
-			inputTokens: total.inputTokens + plan.estimate.inputTokens,
-			outputTokens: total.outputTokens + plan.estimate.outputTokens,
-			totalTokens: total.totalTokens + plan.estimate.totalTokens,
-		}),
-		{ cost: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0 },
-	);
+	return {
+		cost: first.cost + second.cost,
+		inputTokens: first.inputTokens + second.inputTokens,
+		outputTokens: first.outputTokens + second.outputTokens,
+		totalTokens: first.totalTokens + second.totalTokens,
+	};
 }
 
-function selectStringsWithinBudget(
+function buildPrefixCharacterTotals(
 	sourceStrings: readonly PotSourceString[],
-	remainingCost: number,
-): readonly PotSourceString[] {
-	if (remainingCost <= 0) return [];
-
-	for (let count = sourceStrings.length; count >= 0; count -= 1) {
-		const selected = sourceStrings.slice(0, count);
-		if (estimateStrings(selected).cost <= remainingCost) return selected;
+): readonly number[] {
+	const totals = [0];
+	for (const sourceString of sourceStrings) {
+		totals.push((totals.at(-1) ?? 0) + sourceString.characters);
 	}
 
-	return [];
+	return totals;
+}
+
+function estimatePrefix(
+	prefixCharacterTotals: readonly number[],
+	count: number,
+): TranslationEstimate {
+	return estimateSourceCharacters(prefixCharacterTotals[count] ?? 0);
+}
+
+function selectStringCountWithinBudget(
+	prefixCharacterTotals: readonly number[],
+	maxCount: number,
+	remainingCost: number,
+): number {
+	if (remainingCost <= 0) return 0;
+
+	let low = 0;
+	let high = maxCount;
+
+	while (low < high) {
+		const middle = Math.ceil((low + high) / 2);
+		if (
+			estimatePrefix(prefixCharacterTotals, middle).cost <= remainingCost
+		) {
+			low = middle;
+		} else {
+			high = middle - 1;
+		}
+	}
+
+	return low;
 }
 
 function buildWorkload(
@@ -265,34 +287,51 @@ function buildWorkload(
 ): TranslatePreviewWorkload {
 	let remainingStrings = preview.maxTotalStrings ?? Number.POSITIVE_INFINITY;
 	let remainingCost = preview.maxCost ?? Number.POSITIVE_INFINITY;
-	const languages = preview.languages.map<LanguageWorkPlan>((language) => {
+	const prefixCharacterTotals = buildPrefixCharacterTotals(analysis.strings);
+	const languages: LanguageWorkPlan[] = [];
+	let totalBatches = 0;
+	let totalEstimate: TranslationEstimate = {
+		cost: 0,
+		inputTokens: 0,
+		outputTokens: 0,
+		totalTokens: 0,
+	};
+	let totalPlannedStrings = 0;
+	let totalSkippedByCost = 0;
+	let totalSkippedByLimit = 0;
+
+	for (const language of preview.languages) {
 		const stringLimit = Math.min(
 			analysis.totalStrings,
 			preview.maxStringsPerJob ?? analysis.totalStrings,
 			remainingStrings,
 		);
-		const limitSelectedStrings = analysis.strings.slice(0, stringLimit);
-		const plannedSourceStrings =
+		const plannedStrings =
 			preview.maxCost === undefined
-				? limitSelectedStrings
-				: selectStringsWithinBudget(
-						limitSelectedStrings,
+				? stringLimit
+				: selectStringCountWithinBudget(
+						prefixCharacterTotals,
+						stringLimit,
 						remainingCost,
 					);
-		const estimate = estimateStrings(plannedSourceStrings);
-		const plannedStrings = plannedSourceStrings.length;
-		const skippedByCost = limitSelectedStrings.length - plannedStrings;
-		const skippedByLimit =
-			analysis.totalStrings - limitSelectedStrings.length;
+		const estimate = estimatePrefix(prefixCharacterTotals, plannedStrings);
+		const batches =
+			plannedStrings === 0
+				? 0
+				: Math.ceil(plannedStrings / preview.batchSize);
+		const skippedByCost = stringLimit - plannedStrings;
+		const skippedByLimit = analysis.totalStrings - stringLimit;
 
 		remainingStrings -= plannedStrings;
 		remainingCost -= estimate.cost;
+		totalBatches += batches;
+		totalEstimate = addEstimates(totalEstimate, estimate);
+		totalPlannedStrings += plannedStrings;
+		totalSkippedByCost += skippedByCost;
+		totalSkippedByLimit += skippedByLimit;
 
-		return {
-			batches:
-				plannedStrings === 0
-					? 0
-					: Math.ceil(plannedStrings / preview.batchSize),
+		languages.push({
+			batches,
 			estimate,
 			language,
 			outputFile: getOutputFile(preview, language),
@@ -300,32 +339,23 @@ function buildWorkload(
 			skippedByCost,
 			skippedByLimit,
 			sourceStrings: analysis.totalStrings,
-		};
-	});
-	const estimate = sumEstimates(languages);
+		});
+	}
 
 	return {
 		analysis,
-		batches: languages.reduce(
-			(total, language) => total + language.batches,
-			0,
-		),
-		estimate,
+		batches: totalBatches,
+		estimate: totalEstimate,
 		languages,
-		plannedStrings: languages.reduce(
-			(total, language) => total + language.plannedStrings,
-			0,
-		),
-		skippedByCost: languages.reduce(
-			(total, language) => total + language.skippedByCost,
-			0,
-		),
-		skippedByLimit: languages.reduce(
-			(total, language) => total + language.skippedByLimit,
-			0,
-		),
+		plannedStrings: totalPlannedStrings,
+		skippedByCost: totalSkippedByCost,
+		skippedByLimit: totalSkippedByLimit,
 		sourceStrings: analysis.totalStrings * preview.languages.length,
 	};
+}
+
+function getConcurrentJobs(preview: TranslateUiPreviewOptions): number {
+	return Math.max(1, Math.min(preview.jobs, preview.languages.length));
 }
 
 function getRenderer(preview: TranslateUiPreviewOptions): ListrRendererValue {
@@ -464,7 +494,7 @@ function buildPreflight(
 	return [
 		"Translate preview",
 		`Source: ${analysis.filePath} (${analysis.totalStrings} strings, ${analysis.pluralStrings} plural, ${analysis.contextStrings} with context, ${analysis.fuzzyStrings} fuzzy)`,
-		`Targets: ${preview.languages.join(", ")} | Jobs: ${Math.min(preview.jobs, preview.languages.length)} | Batch size: ${preview.batchSize}`,
+		`Targets: ${preview.languages.join(", ")} | Jobs: ${getConcurrentJobs(preview)} | Batch size: ${preview.batchSize}`,
 		`Plan: ${workload.plannedStrings}/${workload.sourceStrings} strings, ${workload.batches} batches | Limits: ${formatLimits(preview)}`,
 		`Estimate: ~${workload.estimate.totalTokens} tokens, ~${formatCurrency(workload.estimate.cost)} | No API calls or .po files will be written.`,
 		"",
@@ -575,10 +605,7 @@ export async function runTranslateUiPreview(
 		buildLanguageTask(preview, language, stepDelayMs),
 	);
 	const runnerOptions = {
-		concurrent: Math.max(
-			1,
-			Math.min(preview.jobs, preview.languages.length),
-		),
+		concurrent: getConcurrentJobs(preview),
 		exitOnError: false,
 		renderer,
 		rendererOptions:

@@ -493,11 +493,7 @@ each target language.
 			`translate-preview-${new Date().toISOString().replaceAll(":", "-")}.json`,
 		);
 
-		await fs.mkdir(debugDirectory, { recursive: true });
-		await fs.writeFile(
-			debugOutputFile,
-			`${JSON.stringify(result, null, 2)}\n`,
-		);
+		await this.writeJsonOutput(debugOutputFile, result);
 
 		return debugOutputFile;
 	}

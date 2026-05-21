@@ -53,28 +53,36 @@ function isSourceEntry(translation: GetTextTranslation): boolean {
 export async function analyzePotFile(filePath: string): Promise<PotAnalysis> {
 	const content = await fs.readFile(filePath);
 	const parsed = po.parse(content, { validation: false });
-	const strings = Object.values(parsed.translations)
-		.flatMap((context) => Object.values(context))
-		.filter(isSourceEntry)
-		.map(toSourceString);
+	const stats = {
+		contextStrings: 0,
+		fuzzyStrings: 0,
+		pluralStrings: 0,
+		sourceCharacters: 0,
+		strings: [] as PotSourceString[],
+	};
+
+	for (const translation of Object.values(parsed.translations).flatMap(
+		(context) => Object.values(context),
+	)) {
+		if (!isSourceEntry(translation)) continue;
+
+		const sourceString = toSourceString(translation);
+		stats.strings.push(sourceString);
+		stats.sourceCharacters += sourceString.characters;
+		if (sourceString.context !== undefined) stats.contextStrings += 1;
+		if (sourceString.flags.includes("fuzzy")) stats.fuzzyStrings += 1;
+		if (sourceString.plural) stats.pluralStrings += 1;
+	}
 
 	return {
 		charset: parsed.charset,
-		contextStrings: strings.filter(
-			(sourceString) => sourceString.context !== undefined,
-		).length,
+		contextStrings: stats.contextStrings,
 		filePath,
-		fuzzyStrings: strings.filter((sourceString) =>
-			sourceString.flags.includes("fuzzy"),
-		).length,
+		fuzzyStrings: stats.fuzzyStrings,
 		headers: parsed.headers,
-		pluralStrings: strings.filter((sourceString) => sourceString.plural)
-			.length,
-		sourceCharacters: strings.reduce(
-			(total, sourceString) => total + sourceString.characters,
-			0,
-		),
-		strings,
-		totalStrings: strings.length,
+		pluralStrings: stats.pluralStrings,
+		sourceCharacters: stats.sourceCharacters,
+		strings: stats.strings,
+		totalStrings: stats.strings.length,
 	};
 }
