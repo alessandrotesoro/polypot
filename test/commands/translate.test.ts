@@ -42,7 +42,56 @@ const EXPECTED_FLAGS = [
 	"--no-env",
 ];
 
+const POT_FIXTURE = `msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\\n"
+
+#: src/a.js:1
+msgid "Hello"
+msgstr ""
+
+#, fuzzy
+#: src/a.js:2
+msgid "Save changes"
+msgstr ""
+
+#: src/a.js:3
+msgctxt "button"
+msgid "Post"
+msgstr ""
+
+#: src/a.js:4
+msgid "%d file"
+msgid_plural "%d files"
+msgstr[0] ""
+msgstr[1] ""
+`;
+
 describe("polypot translate", () => {
+	const tempDirs: string[] = [];
+
+	afterEach(async () => {
+		await Promise.all(
+			tempDirs
+				.splice(0)
+				.map((tempDir) =>
+					fs.rm(tempDir, { recursive: true, force: true }),
+				),
+		);
+	});
+
+	async function writePotFixture(): Promise<string> {
+		const tempDir = await fs.mkdtemp(
+			path.join(os.tmpdir(), "polypot-translate-pot-"),
+		);
+		tempDirs.push(tempDir);
+		const potFile = path.join(tempDir, "messages.pot");
+		await fs.writeFile(potFile, POT_FIXTURE);
+
+		return potFile;
+	}
+
 	it("lists all 30+ Potomatic-mirrored flags in --help", async () => {
 		const { stdout } = await runCommand(["translate", "--help"]);
 		for (const flag of EXPECTED_FLAGS) {
@@ -64,13 +113,14 @@ describe("polypot translate", () => {
 	});
 
 	it("parses comma-separated --target-languages and short flags", async () => {
+		const potFile = await writePotFixture();
 		const { stdout, error } = await runCommand([
 			"translate",
 			"--json",
 			"-l",
 			"fr_FR,es_ES",
 			"-p",
-			"foo.pot",
+			potFile,
 			"-b",
 			"30",
 			"-j",
@@ -143,6 +193,11 @@ describe("polypot translate", () => {
 					"--max-strings-per-job must be an integer greater than or equal to 1",
 			},
 			{
+				args: ["--max-total-strings", "0"],
+				message:
+					"--max-total-strings must be an integer greater than or equal to 1",
+			},
+			{
 				args: ["--max-cost", "12abc"],
 				message: "--max-cost must be a non-negative number",
 			},
@@ -209,12 +264,13 @@ describe("polypot translate", () => {
 	});
 
 	it("renders a UI-only translation preview with per-language progress", async () => {
+		const potFile = await writePotFixture();
 		const { stdout, error } = await runCommand([
 			"translate",
 			"-l",
 			"fr_FR",
 			"-p",
-			"foo.pot",
+			potFile,
 			"--batch-size",
 			"20",
 			"--dry-run",
@@ -223,23 +279,28 @@ describe("polypot translate", () => {
 		]);
 
 		expect(error).to.equal(undefined);
-		expect(stdout).to.include("fr_FR");
-		expect(stdout).to.include("------------------------ 0% (0/60 strings)");
+		expect(stdout).to.include("Translate preview");
 		expect(stdout).to.include(
-			"######################## 100% (60/60 strings)",
+			"4 strings, 1 plural, 1 with context, 1 fuzzy",
+		);
+		expect(stdout).to.include("fr_FR");
+		expect(stdout).to.include("------------------------ 0% (0/4 strings)");
+		expect(stdout).to.include(
+			"######################## 100% (4/4 strings)",
 		);
 		expect(stdout).to.include("preview complete, no translations written");
-		expect(stdout).to.include("Translation logic is not implemented yet.");
+		expect(stdout).to.include("No translations were generated.");
 	});
 
 	it("exposes the resolved appConfig defaults in JSON output", async () => {
+		const potFile = await writePotFixture();
 		const { stdout, error } = await runCommand([
 			"translate",
 			"--json",
 			"-l",
 			"fr_FR",
 			"-p",
-			"foo.pot",
+			potFile,
 			"--dry-run",
 		]);
 		const result = JSON.parse(stdout) as {
@@ -247,20 +308,23 @@ describe("polypot translate", () => {
 				readonly batchSize: number;
 				readonly provider: string;
 			};
+			readonly analysis: {
+				readonly totalStrings: number;
+			};
 			readonly status: string;
 			readonly summary: string;
 		};
 
 		expect(error).to.equal(undefined);
 		expect(result.status).to.equal("previewed");
+		expect(result.analysis.totalStrings).to.equal(4);
 		expect(result.plan.provider).to.equal("openai");
 		expect(result.plan.batchSize).to.equal(20);
-		expect(result.summary).to.include(
-			"Translation logic is not implemented yet.",
-		);
+		expect(result.summary).to.include("No translations were generated.");
 	});
 
 	it("writes JSON preview output to --output-file", async () => {
+		const potFile = await writePotFixture();
 		const outputDir = await fs.mkdtemp(
 			path.join(os.tmpdir(), "polypot-translate-output-"),
 		);
@@ -272,7 +336,7 @@ describe("polypot translate", () => {
 				"-l",
 				"fr_FR",
 				"-p",
-				"foo.pot",
+				potFile,
 				"--dry-run",
 				"--output-format",
 				"json",
@@ -299,12 +363,13 @@ describe("polypot translate", () => {
 	});
 
 	it("suppresses human success output at --verbose-level 0", async () => {
+		const potFile = await writePotFixture();
 		const { stdout, error } = await runCommand([
 			"translate",
 			"-l",
 			"fr_FR",
 			"-p",
-			"foo.pot",
+			potFile,
 			"--dry-run",
 			"--verbose-level",
 			"0",
@@ -315,12 +380,13 @@ describe("polypot translate", () => {
 	});
 
 	it("still emits explicit JSON stdout at --verbose-level 0", async () => {
+		const potFile = await writePotFixture();
 		const { stdout, error } = await runCommand([
 			"translate",
 			"-l",
 			"fr_FR",
 			"-p",
-			"foo.pot",
+			potFile,
 			"--dry-run",
 			"--output-format",
 			"json",
@@ -336,13 +402,22 @@ describe("polypot translate", () => {
 	});
 
 	it("exposes resolved non-secret translate settings in JSON output", async () => {
+		const previousCwd = process.cwd();
+		const projectDir = await fs.mkdtemp(
+			path.join(os.tmpdir(), "polypot-translate-debug-"),
+		);
+		tempDirs.push(projectDir);
+		const potFile = path.join(projectDir, "messages.pot");
+		await fs.writeFile(potFile, POT_FIXTURE);
+		process.chdir(projectDir);
+
 		const { stdout, error } = await runCommand([
 			"translate",
 			"--json",
 			"-l",
 			"fr_FR,es_ES",
 			"-p",
-			"foo.pot",
+			potFile,
 			"--input-po-path",
 			"base.po",
 			"--output-dir",
@@ -382,8 +457,11 @@ describe("polypot translate", () => {
 			"2",
 			"--dry-run",
 			"--save-debug-info",
-		]);
+		]).finally(() => {
+			process.chdir(previousCwd);
+		});
 		const result = JSON.parse(stdout) as {
+			readonly debugOutputFile: string;
 			readonly plan: {
 				readonly settings: {
 					readonly behavior: {
@@ -427,9 +505,10 @@ describe("polypot translate", () => {
 		const settings = result.plan.settings;
 
 		expect(error).to.equal(undefined);
+		expect(result.debugOutputFile).to.include(".polypot/debug");
 		expect(settings.source).to.deep.include({
 			inputPoPath: "base.po",
-			potFilePath: "foo.pot",
+			potFilePath: potFile,
 		});
 		expect(settings.source.targetLanguages).to.deep.equal([
 			"fr_FR",
@@ -464,13 +543,14 @@ describe("polypot translate", () => {
 	});
 
 	it("keeps JSON language results in requested order", async () => {
+		const potFile = await writePotFixture();
 		const { stdout, error } = await runCommand([
 			"translate",
 			"--json",
 			"-l",
 			"fr_FR,es_ES,de_DE",
 			"-p",
-			"foo.pot",
+			potFile,
 			"-j",
 			"3",
 			"--dry-run",
@@ -485,6 +565,38 @@ describe("polypot translate", () => {
 		expect(
 			result.results.map((language) => language.language),
 		).to.deep.equal(["fr_FR", "es_ES", "de_DE"]);
+	});
+
+	it("applies the global string limit to the preview plan", async () => {
+		const potFile = await writePotFixture();
+		const { stdout, error } = await runCommand([
+			"translate",
+			"--json",
+			"-l",
+			"fr_FR,es_ES",
+			"-p",
+			potFile,
+			"--max-total-strings",
+			"5",
+			"--dry-run",
+		]);
+		const result = JSON.parse(stdout) as {
+			readonly results: readonly {
+				readonly language: string;
+				readonly skippedByLimit: number;
+				readonly strings: number;
+			}[];
+		};
+		const frResult = result.results.find(
+			(language) => language.language === "fr_FR",
+		);
+		const esResult = result.results.find(
+			(language) => language.language === "es_ES",
+		);
+
+		expect(error).to.equal(undefined);
+		expect(frResult).to.deep.include({ skippedByLimit: 0, strings: 4 });
+		expect(esResult).to.deep.include({ skippedByLimit: 3, strings: 1 });
 	});
 
 	it("explains missing target languages without starting work", async () => {
@@ -507,6 +619,7 @@ describe("polypot translate", () => {
 
 		try {
 			await fs.mkdir(path.join(projectDir, ".polypot"));
+			await fs.writeFile(path.join(projectDir, "foo.pot"), POT_FIXTURE);
 			await fs.writeFile(
 				path.join(projectDir, ".polypot", "config.yaml"),
 				"provider:\n  model: project-model\nsource:\n  sourceLanguage: it_IT\n  targetLanguages:\n    - fr_FR\n",

@@ -6,10 +6,17 @@ import {
 	type ListrRendererValue,
 	type ListrTask,
 } from "listr2";
+import {
+	analyzePotFile,
+	type PotAnalysis,
+	type PotSourceString,
+} from "./pot.js";
 
 const PROGRESS_BAR_SIZE = 24;
-const PREVIEW_BATCHES = 3;
 const PREVIEW_STEP_DELAY_MS = 650;
+const ESTIMATED_CHARS_PER_TOKEN = 4;
+const ESTIMATED_OUTPUT_TOKEN_MULTIPLIER = 1.35;
+const PREVIEW_COST_PER_1000_TOKENS = 0.002;
 
 interface TranslateUiPreviewOptions {
 	readonly batchSize: number;
@@ -18,6 +25,7 @@ interface TranslateUiPreviewOptions {
 	readonly languages: readonly string[];
 	readonly maxCost?: number;
 	readonly maxStringsPerJob?: number;
+	readonly maxTotalStrings?: number;
 	readonly outputDir: string;
 	readonly outputFormat: string;
 	readonly poFilePrefix?: string;
@@ -88,15 +96,56 @@ interface TranslateUiPlan {
 	readonly settings: TranslateSettingsSnapshot;
 }
 
-export interface LanguagePreviewResult {
+interface TranslationEstimate {
+	readonly cost: number;
+	readonly inputTokens: number;
+	readonly outputTokens: number;
+	readonly totalTokens: number;
+}
+
+interface LanguageWorkPlan {
 	readonly batches: number;
+	readonly estimate: TranslationEstimate;
 	readonly language: string;
 	readonly outputFile: string;
+	readonly plannedStrings: number;
+	readonly skippedByCost: number;
+	readonly skippedByLimit: number;
+	readonly sourceStrings: number;
+}
+
+interface TranslatePreviewWorkload {
+	readonly analysis: PotAnalysis;
+	readonly batches: number;
+	readonly estimate: TranslationEstimate;
+	readonly languages: readonly LanguageWorkPlan[];
+	readonly plannedStrings: number;
+	readonly skippedByCost: number;
+	readonly skippedByLimit: number;
+	readonly sourceStrings: number;
+}
+
+export interface LanguagePreviewResult {
+	readonly batches: number;
+	readonly estimate: TranslationEstimate;
+	readonly language: string;
+	readonly outputFile: string;
+	readonly skippedByCost: number;
+	readonly skippedByLimit: number;
+	readonly sourceStrings: number;
 	readonly strings: number;
 	readonly translated: number;
 }
 
 export interface TranslateUiResult {
+	readonly analysis?: {
+		readonly contextStrings: number;
+		readonly filePath: string;
+		readonly fuzzyStrings: number;
+		readonly pluralStrings: number;
+		readonly sourceCharacters: number;
+		readonly totalStrings: number;
+	};
 	readonly implemented: false;
 	readonly mode: "ui-preview";
 	readonly plan: {
@@ -107,6 +156,7 @@ export interface TranslateUiResult {
 		readonly languages: readonly string[];
 		readonly maxCost?: number;
 		readonly maxStringsPerJob?: number;
+		readonly maxTotalStrings?: number;
 		readonly model: string;
 		readonly outputDir: string;
 		readonly potFilePath?: string;
@@ -126,27 +176,10 @@ const progressBarOptions: cliProgress.Options = {
 	barsize: PROGRESS_BAR_SIZE,
 };
 
-/**
- * Build a stable progress bar string using cli-progress' formatter.
- */
 function buildProgressBar(value: number, total: number): string {
-	const progress = total > 0 ? Math.min(value / total, 1) : 0;
+	const progress = total > 0 ? Math.min(value / total, 1) : 1;
 
 	return cliProgress.Format.BarFormat(progress, progressBarOptions);
-}
-
-/**
- * Keep the UI preview explicit while still showing a realistic batch shape.
- */
-function getPreviewStringCount(preview: TranslateUiPreviewOptions): number {
-	return preview.maxStringsPerJob ?? preview.batchSize * PREVIEW_BATCHES;
-}
-
-function getPreviewBatchCount(preview: TranslateUiPreviewOptions): number {
-	return Math.max(
-		1,
-		Math.ceil(getPreviewStringCount(preview) / preview.batchSize),
-	);
 }
 
 function getOutputFile(
@@ -163,26 +196,136 @@ function formatCurrency(value: number): string {
 	return `$${value.toFixed(4)}`;
 }
 
-function formatLanguageTitle(
-	preview: TranslateUiPreviewOptions,
-	language: string,
-	processed: number,
-	total: number,
-	batch: number,
-	totalBatches: number,
-): string {
-	const percentage = total > 0 ? Math.round((processed / total) * 100) : 0;
-	const costText =
-		preview.maxCost === undefined
-			? "cost tracking: preview"
-			: `cost limit: ${formatCurrency(preview.maxCost)}`;
-	const modeText = preview.dryRun ? "dry run" : "UI preview";
+function formatDuration(ms: number): string {
+	if (ms < 1000) return "<1s";
 
-	return [
-		`${language} ${buildProgressBar(processed, total)} ${percentage}% (${processed}/${total} strings)`,
-		`source: ${preview.sourceLanguage} | batch ${batch}/${totalBatches} | ${modeText}`,
-		`${costText} | output: ${getOutputFile(preview, language)}`,
-	].join("\n");
+	const seconds = Math.ceil(ms / 1000);
+	if (seconds < 60) return `${seconds}s`;
+
+	const minutes = Math.floor(seconds / 60);
+	const remainingSeconds = seconds % 60;
+
+	return remainingSeconds === 0
+		? `${minutes}m`
+		: `${minutes}m ${remainingSeconds}s`;
+}
+
+function estimateStrings(
+	sourceStrings: readonly PotSourceString[],
+): TranslationEstimate {
+	const sourceCharacters = sourceStrings.reduce(
+		(total, sourceString) => total + sourceString.characters,
+		0,
+	);
+	const inputTokens = Math.ceil(sourceCharacters / ESTIMATED_CHARS_PER_TOKEN);
+	const outputTokens = Math.ceil(
+		inputTokens * ESTIMATED_OUTPUT_TOKEN_MULTIPLIER,
+	);
+	const totalTokens = inputTokens + outputTokens;
+
+	return {
+		cost: (totalTokens / 1000) * PREVIEW_COST_PER_1000_TOKENS,
+		inputTokens,
+		outputTokens,
+		totalTokens,
+	};
+}
+
+function sumEstimates(
+	plans: readonly Pick<LanguageWorkPlan, "estimate">[],
+): TranslationEstimate {
+	return plans.reduce<TranslationEstimate>(
+		(total, plan) => ({
+			cost: total.cost + plan.estimate.cost,
+			inputTokens: total.inputTokens + plan.estimate.inputTokens,
+			outputTokens: total.outputTokens + plan.estimate.outputTokens,
+			totalTokens: total.totalTokens + plan.estimate.totalTokens,
+		}),
+		{ cost: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+	);
+}
+
+function selectStringsWithinBudget(
+	sourceStrings: readonly PotSourceString[],
+	remainingCost: number,
+): readonly PotSourceString[] {
+	if (remainingCost <= 0) return [];
+
+	for (let count = sourceStrings.length; count >= 0; count -= 1) {
+		const selected = sourceStrings.slice(0, count);
+		if (estimateStrings(selected).cost <= remainingCost) return selected;
+	}
+
+	return [];
+}
+
+function buildWorkload(
+	preview: TranslateUiPreviewOptions,
+	analysis: PotAnalysis,
+): TranslatePreviewWorkload {
+	let remainingStrings = preview.maxTotalStrings ?? Number.POSITIVE_INFINITY;
+	let remainingCost = preview.maxCost ?? Number.POSITIVE_INFINITY;
+	const languages = preview.languages.map<LanguageWorkPlan>((language) => {
+		const stringLimit = Math.min(
+			analysis.totalStrings,
+			preview.maxStringsPerJob ?? analysis.totalStrings,
+			remainingStrings,
+		);
+		const limitSelectedStrings = analysis.strings.slice(0, stringLimit);
+		const plannedSourceStrings =
+			preview.maxCost === undefined
+				? limitSelectedStrings
+				: selectStringsWithinBudget(
+						limitSelectedStrings,
+						remainingCost,
+					);
+		const estimate = estimateStrings(plannedSourceStrings);
+		const plannedStrings = plannedSourceStrings.length;
+		const skippedByCost = limitSelectedStrings.length - plannedStrings;
+		const skippedByLimit =
+			analysis.totalStrings - limitSelectedStrings.length;
+
+		remainingStrings -= plannedStrings;
+		remainingCost -= estimate.cost;
+
+		return {
+			batches:
+				plannedStrings === 0
+					? 0
+					: Math.ceil(plannedStrings / preview.batchSize),
+			estimate,
+			language,
+			outputFile: getOutputFile(preview, language),
+			plannedStrings,
+			skippedByCost,
+			skippedByLimit,
+			sourceStrings: analysis.totalStrings,
+		};
+	});
+	const estimate = sumEstimates(languages);
+
+	return {
+		analysis,
+		batches: languages.reduce(
+			(total, language) => total + language.batches,
+			0,
+		),
+		estimate,
+		languages,
+		plannedStrings: languages.reduce(
+			(total, language) => total + language.plannedStrings,
+			0,
+		),
+		skippedByCost: languages.reduce(
+			(total, language) => total + language.skippedByCost,
+			0,
+		),
+		skippedByLimit: languages.reduce(
+			(total, language) => total + language.skippedByLimit,
+			0,
+		),
+		sourceStrings: analysis.totalStrings * preview.languages.length,
+	};
 }
 
 function getRenderer(preview: TranslateUiPreviewOptions): ListrRendererValue {
@@ -202,83 +345,155 @@ function delay(ms: number): Promise<void> {
 	});
 }
 
+function formatLimits(preview: TranslateUiPreviewOptions): string {
+	const limits = [
+		preview.maxStringsPerJob === undefined
+			? undefined
+			: `per language ${preview.maxStringsPerJob}`,
+		preview.maxTotalStrings === undefined
+			? undefined
+			: `global ${preview.maxTotalStrings}`,
+		preview.maxCost === undefined
+			? undefined
+			: `budget ${formatCurrency(preview.maxCost)}`,
+	].filter((limit): limit is string => limit !== undefined);
+
+	return limits.length === 0 ? "none" : limits.join(" | ");
+}
+
+function formatLanguageTitle(
+	preview: TranslateUiPreviewOptions,
+	plan: LanguageWorkPlan,
+	processed: number,
+	phase: string,
+	startedAt: number,
+): string {
+	const percentage =
+		plan.plannedStrings > 0
+			? Math.round((processed / plan.plannedStrings) * 100)
+			: 100;
+	const elapsedMs = Date.now() - startedAt;
+	const etaMs =
+		processed > 0 && processed < plan.plannedStrings
+			? (elapsedMs / processed) * (plan.plannedStrings - processed)
+			: 0;
+	const modeText = preview.dryRun ? "dry run" : "preview";
+
+	return [
+		`${plan.language} ${buildProgressBar(processed, plan.plannedStrings)} ${percentage}% (${processed}/${plan.plannedStrings} strings)`,
+		`phase: ${phase} | elapsed ${formatDuration(elapsedMs)} | eta ${formatDuration(etaMs)} | ${modeText}`,
+		`tokens ~${plan.estimate.totalTokens} | cost ~${formatCurrency(plan.estimate.cost)} | skipped ${plan.skippedByLimit + plan.skippedByCost}`,
+		`limits: ${formatLimits(preview)} | output: ${plan.outputFile}`,
+	].join("\n");
+}
+
 function buildLanguageTask(
 	preview: TranslateUiPreviewOptions,
-	language: string,
+	plan: LanguageWorkPlan,
 	stepDelayMs: number,
 ): ListrTask {
-	const totalStrings = getPreviewStringCount(preview);
-	const totalBatches = getPreviewBatchCount(preview);
-
 	return {
-		title: formatLanguageTitle(
-			preview,
-			language,
-			0,
-			totalStrings,
-			1,
-			totalBatches,
-		),
+		title:
+			plan.plannedStrings === 0
+				? `${plan.language} skipped: no strings selected after limits`
+				: `${plan.language} queued (${plan.plannedStrings}/${plan.sourceStrings} strings planned)`,
 		task: async (_ctx, task): Promise<void> => {
-			for (let batch = 1; batch <= totalBatches; batch += 1) {
+			if (plan.plannedStrings === 0) {
+				task.title = `${plan.language} skipped: ${plan.skippedByLimit} by limits, ${plan.skippedByCost} by cost`;
+				return;
+			}
+
+			const startedAt = Date.now();
+			task.title = formatLanguageTitle(
+				preview,
+				plan,
+				0,
+				"preparing batches",
+				startedAt,
+			);
+			if (stepDelayMs > 0) await delay(stepDelayMs);
+
+			for (let batch = 1; batch <= plan.batches; batch += 1) {
 				const processed = Math.min(
 					batch * preview.batchSize,
-					totalStrings,
+					plan.plannedStrings,
 				);
 				task.title = formatLanguageTitle(
 					preview,
-					language,
+					plan,
 					processed,
-					totalStrings,
-					batch,
-					totalBatches,
+					`batch ${batch}/${plan.batches}`,
+					startedAt,
 				);
 				if (stepDelayMs > 0) await delay(stepDelayMs);
 			}
 
-			task.title = `${language} ${buildProgressBar(totalStrings, totalStrings)} 100% (${totalStrings}/${totalStrings} strings) | preview complete, no translations written`;
+			task.title = formatLanguageTitle(
+				preview,
+				plan,
+				plan.plannedStrings,
+				"validating planned output",
+				startedAt,
+			);
+			if (stepDelayMs > 0) await delay(stepDelayMs);
+			task.title = `${plan.language} ${buildProgressBar(plan.plannedStrings, plan.plannedStrings)} 100% (${plan.plannedStrings}/${plan.plannedStrings} strings) | preview complete, no translations written`;
 		},
 	};
 }
 
-function buildLanguageResult(
-	preview: TranslateUiPreviewOptions,
-	language: string,
-): LanguagePreviewResult {
+function buildLanguageResult(plan: LanguageWorkPlan): LanguagePreviewResult {
 	return {
-		batches: getPreviewBatchCount(preview),
-		language,
-		outputFile: getOutputFile(preview, language),
-		strings: getPreviewStringCount(preview),
+		batches: plan.batches,
+		estimate: plan.estimate,
+		language: plan.language,
+		outputFile: plan.outputFile,
+		skippedByCost: plan.skippedByCost,
+		skippedByLimit: plan.skippedByLimit,
+		sourceStrings: plan.sourceStrings,
+		strings: plan.plannedStrings,
 		translated: 0,
 	};
 }
 
-function buildLanguageResults(
+function buildPreflight(
 	preview: TranslateUiPreviewOptions,
-): readonly LanguagePreviewResult[] {
-	return preview.languages.map((language) =>
-		buildLanguageResult(preview, language),
-	);
+	workload: TranslatePreviewWorkload,
+): string {
+	const analysis = workload.analysis;
+
+	return [
+		"Translate preview",
+		`Source: ${analysis.filePath} (${analysis.totalStrings} strings, ${analysis.pluralStrings} plural, ${analysis.contextStrings} with context, ${analysis.fuzzyStrings} fuzzy)`,
+		`Targets: ${preview.languages.join(", ")} | Jobs: ${Math.min(preview.jobs, preview.languages.length)} | Batch size: ${preview.batchSize}`,
+		`Plan: ${workload.plannedStrings}/${workload.sourceStrings} strings, ${workload.batches} batches | Limits: ${formatLimits(preview)}`,
+		`Estimate: ~${workload.estimate.totalTokens} tokens, ~${formatCurrency(workload.estimate.cost)} | No API calls or .po files will be written.`,
+		"",
+	].join("\n");
 }
 
-function buildSummary(result: TranslateUiResult): string {
-	if (result.status === "blocked") return result.summary;
-
-	const languageCount = result.results.length;
-	const stringCount = result.results.reduce(
-		(total, language) => total + language.strings,
-		0,
+function buildSummaryFromWorkload(workload: TranslatePreviewWorkload): string {
+	const languageLines = workload.languages.map(
+		(language) =>
+			`- ${language.language}: ${language.plannedStrings}/${language.sourceStrings} strings, ${language.batches} batches, ~${language.estimate.totalTokens} tokens, ~${formatCurrency(language.estimate.cost)}, output ${language.outputFile}`,
 	);
 
-	return `Previewed ${languageCount} language${languageCount === 1 ? "" : "s"} and ${stringCount} planned string${stringCount === 1 ? "" : "s"}. Translation logic is not implemented yet.`;
+	return [
+		"Preview complete. No translations were generated.",
+		`Languages: ${workload.languages.length} | Source strings: ${workload.analysis.totalStrings} | Planned work: ${workload.plannedStrings}/${workload.sourceStrings} strings`,
+		`Skipped: ${workload.skippedByLimit} by string limits, ${workload.skippedByCost} by cost budget`,
+		`Batches: ${workload.batches} | Estimated tokens: ~${workload.estimate.totalTokens} | Estimated cost: ~${formatCurrency(workload.estimate.cost)}`,
+		"Planned outputs:",
+		...languageLines,
+		"Estimate note: token and cost numbers are local planning estimates only.",
+	].join("\n");
 }
 
-export async function runTranslateUiPreview(
+function buildBaseResult(
 	plan: TranslateUiPlan,
-): Promise<TranslateUiResult> {
+): Omit<TranslateUiResult, "analysis" | "results" | "status" | "summary"> {
 	const { config, preview } = plan;
-	const baseResult = {
+
+	return {
 		implemented: false,
 		mode: "ui-preview",
 		plan: {
@@ -291,6 +506,9 @@ export async function runTranslateUiPreview(
 			...(preview.maxStringsPerJob !== undefined && {
 				maxStringsPerJob: preview.maxStringsPerJob,
 			}),
+			...(preview.maxTotalStrings !== undefined && {
+				maxTotalStrings: preview.maxTotalStrings,
+			}),
 			model: config.model,
 			outputDir: preview.outputDir,
 			...(config.potFilePath !== undefined && {
@@ -300,7 +518,14 @@ export async function runTranslateUiPreview(
 			settings: plan.settings,
 			sourceLanguage: preview.sourceLanguage,
 		},
-	} as const;
+	};
+}
+
+export async function runTranslateUiPreview(
+	plan: TranslateUiPlan,
+): Promise<TranslateUiResult> {
+	const { config, preview } = plan;
+	const baseResult = buildBaseResult(plan);
 
 	if (preview.languages.length === 0) {
 		return {
@@ -312,24 +537,41 @@ export async function runTranslateUiPreview(
 		};
 	}
 
-	const renderer = getRenderer(preview);
-	const results = buildLanguageResults(preview);
-	if (renderer === "silent") {
-		const result: TranslateUiResult = {
-			...baseResult,
-			results,
-			status: "previewed",
-			summary: "",
-		};
-
+	if (config.potFilePath === undefined) {
 		return {
-			...result,
-			summary: buildSummary(result),
+			...baseResult,
+			results: [],
+			status: "blocked",
+			summary:
+				"No POT file path is configured. Add --pot-file-path or set source.potFilePath in Polypot config.",
 		};
 	}
 
+	const renderer = getRenderer(preview);
+	const analysis = await analyzePotFile(config.potFilePath);
+	const workload = buildWorkload(preview, analysis);
+	const results = workload.languages.map(buildLanguageResult);
+	const result: TranslateUiResult = {
+		...baseResult,
+		analysis: {
+			contextStrings: analysis.contextStrings,
+			filePath: analysis.filePath,
+			fuzzyStrings: analysis.fuzzyStrings,
+			pluralStrings: analysis.pluralStrings,
+			sourceCharacters: analysis.sourceCharacters,
+			totalStrings: analysis.totalStrings,
+		},
+		results,
+		status: "previewed",
+		summary: buildSummaryFromWorkload(workload),
+	};
+
+	if (renderer === "silent") return result;
+
+	process.stdout.write(buildPreflight(preview, workload));
+
 	const stepDelayMs = getPreviewStepDelayMs(renderer);
-	const tasks = preview.languages.map((language) =>
+	const tasks = workload.languages.map((language) =>
 		buildLanguageTask(preview, language, stepDelayMs),
 	);
 	const runnerOptions = {
@@ -342,7 +584,11 @@ export async function runTranslateUiPreview(
 		rendererOptions:
 			renderer === "verbose"
 				? { logTitleChange: true }
-				: { collapseErrors: false, formatOutput: "wrap" },
+				: {
+						collapseErrors: false,
+						formatOutput: "wrap",
+						showTimer: true,
+					},
 	} satisfies ListrBaseClassOptions<
 		unknown,
 		ListrRendererValue,
@@ -355,15 +601,5 @@ export async function runTranslateUiPreview(
 
 	await runner.run();
 
-	const result: TranslateUiResult = {
-		...baseResult,
-		results,
-		status: "previewed",
-		summary: "",
-	};
-
-	return {
-		...result,
-		summary: buildSummary(result),
-	};
+	return result;
 }

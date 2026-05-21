@@ -276,6 +276,12 @@ each target language.
 			"--max-strings-per-job",
 			{ min: 1 },
 		);
+		const maxTotalStrings = this.resolveOptionalBoundedInteger(
+			this.flags["max-total-strings"] ??
+				this.appConfig.limits.maxTotalStrings,
+			"--max-total-strings",
+			{ min: 1 },
+		);
 		const poFilePrefix =
 			this.flags["po-file-prefix"] ?? this.appConfig.output.poFilePrefix;
 		const potFilePath =
@@ -290,6 +296,7 @@ each target language.
 			outputFormat,
 			...(maxCost !== undefined && { maxCost }),
 			...(maxStringsPerJob !== undefined && { maxStringsPerJob }),
+			...(maxTotalStrings !== undefined && { maxTotalStrings }),
 			...(outputFile !== undefined && { outputFile }),
 			...(poFilePrefix !== undefined && { poFilePrefix }),
 			...(potFilePath !== undefined && { potFilePath }),
@@ -312,6 +319,7 @@ each target language.
 				languages,
 				...(maxCost !== undefined && { maxCost }),
 				...(maxStringsPerJob !== undefined && { maxStringsPerJob }),
+				...(maxTotalStrings !== undefined && { maxTotalStrings }),
 				outputDir:
 					this.flags["output-dir"] ?? this.appConfig.output.outputDir,
 				outputFormat: usesJsonStdout ? "json" : outputFormat,
@@ -323,22 +331,31 @@ each target language.
 			},
 		});
 
+		const debugOutputFile = await this.writeDebugOutputIfRequested(result);
+		const finalResult =
+			debugOutputFile === undefined
+				? result
+				: { ...result, debugOutputFile };
+
 		if (outputFile !== undefined) {
-			await this.writeJsonOutput(outputFile, result);
+			await this.writeJsonOutput(outputFile, finalResult);
 		}
 
 		if (!this.jsonEnabled()) {
 			if (outputFormat === "json" && outputFile === undefined) {
-				this.log(JSON.stringify(result, null, 2));
+				this.log(JSON.stringify(finalResult, null, 2));
 			} else if (verboseLevel > 0) {
 				this.log(result.summary);
+				if (debugOutputFile !== undefined) {
+					this.log(`Debug preview written to: ${debugOutputFile}`);
+				}
 				if (outputFile !== undefined) {
 					this.log(`JSON preview written to: ${outputFile}`);
 				}
 			}
 		}
 
-		return result;
+		return finalResult;
 	}
 
 	private buildSettingsSnapshot(resolved: {
@@ -347,6 +364,7 @@ each target language.
 		readonly languages: readonly string[];
 		readonly maxCost?: number;
 		readonly maxStringsPerJob?: number;
+		readonly maxTotalStrings?: number;
 		readonly outputFile?: string;
 		readonly outputFormat: string;
 		readonly poFilePrefix?: string;
@@ -356,10 +374,6 @@ each target language.
 			this.flags["input-po-path"] ?? this.appConfig.source.inputPoPath;
 		const maxTokens =
 			this.flags["max-tokens"] ?? this.appConfig.provider.maxTokens;
-		const maxTotalStrings =
-			this.flags["max-total-strings"] ??
-			this.appConfig.limits.maxTotalStrings;
-
 		return {
 			behavior: {
 				dictionaryPath:
@@ -394,7 +408,9 @@ each target language.
 				...(resolved.maxStringsPerJob !== undefined && {
 					maxStringsPerJob: resolved.maxStringsPerJob,
 				}),
-				...(maxTotalStrings !== undefined && { maxTotalStrings }),
+				...(resolved.maxTotalStrings !== undefined && {
+					maxTotalStrings: resolved.maxTotalStrings,
+				}),
 			},
 			output: {
 				localeFormat:
@@ -462,6 +478,28 @@ each target language.
 		}
 
 		await fs.writeFile(outputFile, `${JSON.stringify(result, null, 2)}\n`);
+	}
+
+	private async writeDebugOutputIfRequested(
+		result: unknown,
+	): Promise<string | undefined> {
+		const saveDebugInfo =
+			this.flags["save-debug-info"] ?? this.appConfig.debug.saveDebugInfo;
+		if (!saveDebugInfo) return undefined;
+
+		const debugDirectory = path.join(process.cwd(), ".polypot", "debug");
+		const debugOutputFile = path.join(
+			debugDirectory,
+			`translate-preview-${new Date().toISOString().replaceAll(":", "-")}.json`,
+		);
+
+		await fs.mkdir(debugDirectory, { recursive: true });
+		await fs.writeFile(
+			debugOutputFile,
+			`${JSON.stringify(result, null, 2)}\n`,
+		);
+
+		return debugOutputFile;
 	}
 
 	private resolveTargetLanguages(): readonly string[] {

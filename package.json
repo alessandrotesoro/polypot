@@ -41,8 +41,10 @@
 	"dependencies": {
 		"@inquirer/prompts": "^8.4.2",
 		"@oclif/core": "^4.11.1",
+		"@types/gettext-parser": "^9.0.0",
 		"cli-progress": "^3.12.0",
 		"dotenv": "^17.4.2",
+		"gettext-parser": "^9.0.2",
 		"listr2": "^10.2.1",
 		"openai": "^6.37.0",
 		"yaml": "^2.8.4",
@@ -60,5 +62,9 @@
 		"oclif": "^4",
 		"ts-node": "^10.9.2",
 		"typescript": "^5"
+	},
+	"overrides": {
+		"diff": "8.0.3",
+		"serialize-javascript": "7.0.5"
 	}
 }
