@@ -102,7 +102,9 @@ async function ensureConfigDir(directory: string, mode: number): Promise<void> {
 	await fs.mkdir(directory, { recursive: true, mode });
 	const stat = await fs.lstat(directory);
 	if (stat.isSymbolicLink()) {
-		throw new Error(`Refusing to use symlinked config directory: ${directory}`);
+		throw new Error(
+			`Refusing to use symlinked config directory: ${directory}`,
+		);
 	}
 	if (!stat.isDirectory()) {
 		throw new Error(`Config path is not a directory: ${directory}`);

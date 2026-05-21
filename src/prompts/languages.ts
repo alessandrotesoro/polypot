@@ -1,8 +1,8 @@
-import { messageWithDefault, type PromptAdapter } from "./common.js";
 import {
 	formatSetupLanguage,
 	setupLanguageChoices,
 } from "../setup/languages.js";
+import { messageWithDefault, type PromptAdapter } from "./common.js";
 
 export async function promptLanguageDefaults(
 	adapter: PromptAdapter,

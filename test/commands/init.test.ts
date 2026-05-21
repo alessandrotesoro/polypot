@@ -4,15 +4,15 @@ import path from "node:path";
 import { runCommand } from "@oclif/test";
 import { expect } from "chai";
 import {
-	readProjectConfig,
-	readProjectSecrets,
-	writeGlobalConfig,
-} from "../../src/config/store.js";
-import {
 	DEFAULT_OPENAI_MODEL,
 	DEFAULT_SOURCE_LANGUAGE,
 	type PolypotConfigInput,
 } from "../../src/config/schema.js";
+import {
+	readProjectConfig,
+	readProjectSecrets,
+	writeGlobalConfig,
+} from "../../src/config/store.js";
 import {
 	buildInitConfig,
 	setInitPromptAdapterForTests,
@@ -235,7 +235,10 @@ describe("polypot init", () => {
 			fs.mkdirSync(path.join(projectDir, ".polypot"));
 			const configPath = path.join(projectDir, ".polypot", "config.yaml");
 			const envPath = path.join(projectDir, ".polypot", ".env");
-			fs.writeFileSync(configPath, "provider:\n  model: existing-model\n");
+			fs.writeFileSync(
+				configPath,
+				"provider:\n  model: existing-model\n",
+			);
 			fs.writeFileSync(envPath, "OPENAI_API_KEY=sk-existing-secret\n");
 			const beforeConfig = fs.readFileSync(configPath, "utf8");
 			const beforeEnv = fs.readFileSync(envPath, "utf8");
@@ -743,15 +746,15 @@ describe("buildInitConfig", () => {
 			},
 		};
 
-			const config = buildInitConfig(existingConfig, {
-				outputDir: "new-output",
-				potFilePath: "new.pot",
-				sourceLanguage: "it_IT",
-				targetLanguages: ["de_DE"],
-			});
-			if (config === undefined) throw new Error("expected config input");
+		const config = buildInitConfig(existingConfig, {
+			outputDir: "new-output",
+			potFilePath: "new.pot",
+			sourceLanguage: "it_IT",
+			targetLanguages: ["de_DE"],
+		});
+		if (config === undefined) throw new Error("expected config input");
 
-			expect(config.provider).to.deep.equal(existingConfig.provider);
+		expect(config.provider).to.deep.equal(existingConfig.provider);
 		expect(config.behavior).to.deep.equal(existingConfig.behavior);
 		expect(config.performance).to.deep.equal(existingConfig.performance);
 		expect(config.source).to.deep.equal({

@@ -1,11 +1,4 @@
 import {
-	readGlobalConfigInputStatus,
-	readGlobalSecrets,
-	readPolypotConfigFileInput,
-	readProjectConfigInputStatus,
-	readProjectSecrets,
-} from "./store.js";
-import {
 	type PolypotConfig,
 	type PolypotConfigInput,
 	PolypotConfigSchema,
@@ -15,6 +8,13 @@ import {
 	EMPTY_SECRETS,
 	type PolypotSecrets,
 } from "./secrets.js";
+import {
+	readGlobalConfigInputStatus,
+	readGlobalSecrets,
+	readPolypotConfigFileInput,
+	readProjectConfigInputStatus,
+	readProjectSecrets,
+} from "./store.js";
 
 export interface LoadPolypotConfigOptions {
 	readonly configPath?: string;

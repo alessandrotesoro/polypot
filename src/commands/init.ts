@@ -1,5 +1,10 @@
 import fs from "node:fs/promises";
 import { Command, Flags } from "@oclif/core";
+import type { ResolveConfigPathsOptions } from "../config/paths.js";
+import { resolveConfigPaths } from "../config/paths.js";
+import type { PolypotConfig, PolypotConfigInput } from "../config/schema.js";
+import { PolypotConfigSchema } from "../config/schema.js";
+import { EMPTY_SECRETS } from "../config/secrets.js";
 import {
 	hasProjectStoreFiles,
 	readProjectConfigInputStatus,
@@ -7,11 +12,6 @@ import {
 	writeProjectConfig,
 	writeProjectSecrets,
 } from "../config/store.js";
-import type { ResolveConfigPathsOptions } from "../config/paths.js";
-import { resolveConfigPaths } from "../config/paths.js";
-import type { PolypotConfig, PolypotConfigInput } from "../config/schema.js";
-import { PolypotConfigSchema } from "../config/schema.js";
-import { EMPTY_SECRETS } from "../config/secrets.js";
 import { polypotEnv } from "../flag-helpers.js";
 import { ensureProjectEnvGitignore } from "../init/gitignore.js";
 import {

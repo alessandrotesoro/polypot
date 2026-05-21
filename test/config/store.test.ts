@@ -3,6 +3,10 @@ import os from "node:os";
 import path from "node:path";
 import { expect } from "chai";
 import {
+	DEFAULT_OPENAI_MODEL,
+	DEFAULT_SOURCE_LANGUAGE,
+} from "../../src/config/schema.js";
+import {
 	readGlobalConfig,
 	readGlobalSecrets,
 	readProjectConfig,
@@ -12,10 +16,6 @@ import {
 	writeProjectConfig,
 	writeProjectSecrets,
 } from "../../src/config/store.js";
-import {
-	DEFAULT_OPENAI_MODEL,
-	DEFAULT_SOURCE_LANGUAGE,
-} from "../../src/config/schema.js";
 
 /**
  * Create a temporary config directory.
@@ -352,7 +352,9 @@ describe("project config store", () => {
 		} catch (error) {
 			expect(error).to.be.instanceOf(Error);
 			if (!(error instanceof Error)) throw error;
-			expect(error.message).to.include("Refusing to write through symlink");
+			expect(error.message).to.include(
+				"Refusing to write through symlink",
+			);
 		}
 	});
 
@@ -397,7 +399,9 @@ describe("project config store", () => {
 		} catch (error) {
 			expect(error).to.be.instanceOf(Error);
 			if (!(error instanceof Error)) throw error;
-			expect(error.message).to.include("Refusing to write through symlink");
+			expect(error.message).to.include(
+				"Refusing to write through symlink",
+			);
 		}
 	});
 

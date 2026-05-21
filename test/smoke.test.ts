@@ -51,8 +51,6 @@ describe("smoke", () => {
 		expect(readme).to.include(".polypot/.env");
 		expect(readme).to.include("--[no-]gitignore");
 		expect(readme).to.not.include("init not implemented");
-		expect(readme).to.not.include(
-			"polypot init` is currently scaffolded",
-		);
+		expect(readme).to.not.include("polypot init` is currently scaffolded");
 	});
 });

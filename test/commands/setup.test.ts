@@ -3,17 +3,17 @@ import os from "node:os";
 import path from "node:path";
 import { runCommand } from "@oclif/test";
 import { expect } from "chai";
+import { loadPolypotRuntimeConfig } from "../../src/config/loader.js";
+import {
+	DEFAULT_OPENAI_MODEL,
+	DEFAULT_SOURCE_LANGUAGE,
+} from "../../src/config/schema.js";
 import {
 	readGlobalConfig,
 	readGlobalSecrets,
 	writeGlobalConfig,
 	writeGlobalSecrets,
 } from "../../src/config/store.js";
-import { loadPolypotRuntimeConfig } from "../../src/config/loader.js";
-import {
-	DEFAULT_OPENAI_MODEL,
-	DEFAULT_SOURCE_LANGUAGE,
-} from "../../src/config/schema.js";
 import {
 	buildSetupConfig,
 	collectSetupAnswers,

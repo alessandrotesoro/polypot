@@ -1,5 +1,9 @@
 import { Command, Flags } from "@oclif/core";
 import YAML from "yaml";
+import type { ResolveConfigPathsOptions } from "../config/paths.js";
+import { resolveConfigPaths } from "../config/paths.js";
+import type { PolypotConfig } from "../config/schema.js";
+import { PolypotConfigSchema } from "../config/schema.js";
 import {
 	hasGlobalStoreFiles,
 	readGlobalConfig,
@@ -8,10 +12,6 @@ import {
 	writeGlobalConfig,
 	writeGlobalSecrets,
 } from "../config/store.js";
-import type { ResolveConfigPathsOptions } from "../config/paths.js";
-import { resolveConfigPaths } from "../config/paths.js";
-import type { PolypotConfig } from "../config/schema.js";
-import { PolypotConfigSchema } from "../config/schema.js";
 import { polypotEnv } from "../flag-helpers.js";
 import { validateOpenAIConnection } from "../providers/openai/connection.js";
 import {

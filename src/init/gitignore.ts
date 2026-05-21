@@ -31,8 +31,5 @@ export async function ensureProjectEnvGitignore(cwd: string): Promise<void> {
 			: existing.endsWith("\n")
 				? existing
 				: `${existing}\n`;
-	await fs.writeFile(
-		gitignorePath,
-		`${prefix}${PROJECT_ENV_IGNORE_ENTRY}\n`,
-	);
+	await fs.writeFile(gitignorePath, `${prefix}${PROJECT_ENV_IGNORE_ENTRY}\n`);
 }
