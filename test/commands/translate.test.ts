@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { runCommand } from "@oclif/test";
 import { expect } from "chai";
+import { po } from "gettext-parser";
 
 const EXPECTED_FLAGS = [
 	"--provider",
@@ -142,9 +143,9 @@ describe("polypot translate", () => {
 		};
 
 		expect(error).to.equal(undefined);
-		expect(result.implemented).to.equal(false);
-		expect(result.mode).to.equal("ui-preview");
-		expect(result.status).to.equal("previewed");
+		expect(result.implemented).to.equal(true);
+		expect(result.mode).to.equal("dry-run");
+		expect(result.status).to.equal("dry-run");
 		expect(result.plan.languages).to.deep.equal(["fr_FR", "es_ES"]);
 		expect(result.plan.batchSize).to.equal(30);
 		expect(result.plan.dryRun).to.equal(true);
@@ -345,7 +346,7 @@ describe("polypot translate", () => {
 		};
 
 		expect(error).to.equal(undefined);
-		expect(result.status).to.equal("previewed");
+		expect(result.status).to.equal("dry-run");
 		expect(result.analysis.totalStrings).to.equal(4);
 		expect(result.plan.provider).to.equal("openai");
 		expect(result.plan.batchSize).to.equal(20);
@@ -382,13 +383,123 @@ describe("polypot translate", () => {
 			};
 
 			expect(error).to.equal(undefined);
-			expect(stdout).to.include("JSON preview written to:");
+			expect(stdout).to.include("JSON output written to:");
 			expect(stdout).to.not.include("not written");
-			expect(output.status).to.equal("previewed");
+			expect(output.status).to.equal("dry-run");
 			expect(output.results[0]?.language).to.equal("fr_FR");
 		} finally {
 			await fs.rm(outputDir, { recursive: true, force: true });
 		}
+	});
+
+	it("writes a PO file without a provider when target base language matches the source", async () => {
+		const potFile = await writePotFixture();
+		const outputDir = await fs.mkdtemp(
+			path.join(os.tmpdir(), "polypot-translate-copy-"),
+		);
+		tempDirs.push(outputDir);
+
+		const { stdout, error } = await runCommand([
+			"translate",
+			"--json",
+			"-l",
+			"en_GB",
+			"-s",
+			"en_US",
+			"-p",
+			potFile,
+			"--output-dir",
+			outputDir,
+		]);
+		const result = JSON.parse(stdout) as {
+			readonly results: readonly {
+				readonly outputFile: string;
+				readonly status: string;
+				readonly translated: number;
+			}[];
+			readonly status: string;
+		};
+		const outputFile = path.join(outputDir, "en_GB.po");
+		const parsed = po.parse(await fs.readFile(outputFile), {
+			validation: false,
+		});
+
+		expect(error).to.equal(undefined);
+		expect(result.status).to.equal("completed");
+		expect(result.results[0]).to.deep.include({
+			outputFile,
+			status: "completed",
+			translated: 4,
+		});
+		expect(parsed.headers["Language"]).to.equal("en-GB");
+		expect(parsed.translations[""]?.["Hello"]?.msgstr).to.deep.equal([
+			"Hello",
+		]);
+	});
+
+	it("blocks provider translation without an API key", async () => {
+		const potFile = await writePotFixture();
+		const previousApiKey = process.env["POLYPOT_API_KEY"];
+		delete process.env["POLYPOT_API_KEY"];
+		const { stdout, error } = await runCommand([
+			"translate",
+			"--json",
+			"--no-config",
+			"--no-env",
+			"-l",
+			"fr_FR",
+			"-p",
+			potFile,
+		]).finally(() => {
+			if (previousApiKey === undefined) {
+				delete process.env["POLYPOT_API_KEY"];
+			} else {
+				process.env["POLYPOT_API_KEY"] = previousApiKey;
+			}
+		});
+		const result = JSON.parse(stdout) as {
+			readonly results: readonly {
+				readonly error: string;
+				readonly failed: number;
+				readonly status: string;
+			}[];
+			readonly status: string;
+		};
+
+		expect(error).to.equal(undefined);
+		expect(process.exitCode).to.equal(1);
+		expect(result.status).to.equal("failed");
+		expect(result.results[0]).to.deep.include({
+			error: "OpenAI API key is required for translation.",
+			failed: 4,
+			status: "failed",
+		});
+	});
+
+	it("blocks unsupported translate providers", async () => {
+		const potFile = await writePotFixture();
+		const { stdout, error } = await runCommand([
+			"translate",
+			"--json",
+			"--provider",
+			"gemini",
+			"-l",
+			"fr_FR",
+			"-p",
+			potFile,
+			"--dry-run",
+		]);
+		const result = JSON.parse(stdout) as {
+			readonly error: {
+				readonly code: string;
+			};
+			readonly status: string;
+		};
+
+		expect(error).to.equal(undefined);
+		expect(process.exitCode).to.equal(1);
+		expect(result.status).to.equal("blocked");
+		expect(result.error.code).to.equal("unsupported_provider");
 	});
 
 	it("writes --output-file before writing debug output", async () => {
@@ -426,8 +537,47 @@ describe("polypot translate", () => {
 			};
 
 			expect(error).to.not.equal(undefined);
-			expect(output.status).to.equal("previewed");
+			expect(output.status).to.equal("dry-run");
 			expect(output.debugOutputFile).to.include(".polypot/debug");
+		} finally {
+			process.chdir(previousCwd);
+		}
+	});
+
+	it("writes prompt debug details only to the debug file", async () => {
+		const previousCwd = process.cwd();
+		const projectDir = await fs.mkdtemp(
+			path.join(os.tmpdir(), "polypot-translate-debug-output-"),
+		);
+		tempDirs.push(projectDir);
+		const potFile = path.join(projectDir, "messages.pot");
+		await fs.writeFile(potFile, POT_FIXTURE);
+
+		try {
+			process.chdir(projectDir);
+			const { stdout, error } = await runCommand([
+				"translate",
+				"--json",
+				"-l",
+				"fr_FR",
+				"-p",
+				potFile,
+				"--dry-run",
+				"--save-debug-info",
+			]);
+			const publicResult = JSON.parse(stdout) as {
+				readonly debug?: unknown;
+				readonly debugOutputFile: string;
+			};
+			const debugResult = JSON.parse(
+				await fs.readFile(publicResult.debugOutputFile, "utf8"),
+			) as {
+				readonly debug: readonly unknown[];
+			};
+
+			expect(error).to.equal(undefined);
+			expect(publicResult.debug).to.equal(undefined);
+			expect(debugResult.debug).to.have.length.greaterThan(0);
 		} finally {
 			process.chdir(previousCwd);
 		}
@@ -469,7 +619,7 @@ describe("polypot translate", () => {
 		};
 
 		expect(error).to.equal(undefined);
-		expect(result.status).to.equal("previewed");
+		expect(result.status).to.equal("dry-run");
 	});
 
 	it("exposes resolved non-secret translate settings in JSON output", async () => {
@@ -905,7 +1055,7 @@ describe("polypot translate", () => {
 			};
 
 			expect(error).to.equal(undefined);
-			expect(result.status).to.equal("previewed");
+			expect(result.status).to.equal("dry-run");
 			expect(result.analysis.filePath).to.equal(
 				path.join(projectDir, "messages.pot"),
 			);
@@ -961,7 +1111,7 @@ describe("polypot translate", () => {
 			};
 
 			expect(error).to.equal(undefined);
-			expect(result.status).to.equal("previewed");
+			expect(result.status).to.equal("dry-run");
 		} finally {
 			process.chdir(previousCwd);
 			await fs.rm(projectDir, { recursive: true, force: true });

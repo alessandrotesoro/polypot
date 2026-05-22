@@ -3,6 +3,7 @@ import path from "node:path";
 import { Flags } from "@oclif/core";
 import { BaseCommand } from "../base-command.js";
 import { DEFAULT_OPENAI_MODEL } from "../config/schema.js";
+import { createPolypotSecrets } from "../config/secrets.js";
 import { polypotEnv } from "../flag-helpers.js";
 import {
 	isSafeLanguageValue,
@@ -12,11 +13,19 @@ import { sanitizeTerminalText } from "../terminal.js";
 import {
 	runTranslateUiPreview,
 	type TranslateSettingsSnapshot,
+	type TranslateUiResult,
 } from "../translate/ui.js";
 
 const UNSAFE_FILE_PREFIX_PATTERN = /[<>:"/\\|?*]|\.\./;
 const PO_FILE_PREFIX_ERROR =
 	"--po-file-prefix cannot contain path separators, drive prefixes, dot segments, control characters, or Windows-reserved filename characters.";
+
+function stripTranslateDebug<T extends TranslateUiResult>(
+	result: T,
+): Omit<T, "debug"> {
+	const { debug: _debug, ...publicResult } = result;
+	return publicResult;
+}
 
 function getExplicitConfigProjectDirectory(configPath: string): string {
 	const configDirectory = path.resolve(path.dirname(configPath));
@@ -341,6 +350,9 @@ each target language.
 					this.flags.provider ?? this.appConfig.provider.provider,
 			},
 			settings,
+			secrets: createPolypotSecrets(
+				this.flags["api-key"] ?? this.runtimeSecrets.openaiApiKey,
+			),
 			preview: {
 				batchSize,
 				dryRun: this.flags["dry-run"] ?? this.appConfig.debug.dryRun,
@@ -361,10 +373,11 @@ each target language.
 		});
 
 		const debugOutputFile = this.getDebugOutputFileIfRequested();
+		const publicResult = stripTranslateDebug(result);
 		const finalResult =
 			debugOutputFile === undefined
-				? result
-				: { ...result, debugOutputFile };
+				? publicResult
+				: { ...publicResult, debugOutputFile };
 
 		if (outputFile !== undefined) {
 			await this.writeJsonOutput(outputFile, finalResult);
@@ -381,18 +394,22 @@ each target language.
 				this.log(result.summary);
 				if (debugOutputFile !== undefined) {
 					this.log(
-						`Debug preview written to: ${sanitizeTerminalText(debugOutputFile)}`,
+						`Debug output written to: ${sanitizeTerminalText(debugOutputFile)}`,
 					);
 				}
 				if (outputFile !== undefined) {
 					this.log(
-						`JSON preview written to: ${sanitizeTerminalText(outputFile)}`,
+						`JSON output written to: ${sanitizeTerminalText(outputFile)}`,
 					);
 				}
 			}
 		}
 
-		if (finalResult.status === "blocked") {
+		if (
+			finalResult.status === "blocked" ||
+			finalResult.status === "failed" ||
+			finalResult.status === "partial"
+		) {
 			process.exitCode = 1;
 		}
 
@@ -532,7 +549,7 @@ each target language.
 		const debugDirectory = path.join(projectDirectory, ".polypot", "debug");
 		return path.join(
 			debugDirectory,
-			`translate-preview-${new Date().toISOString().replaceAll(":", "-")}.json`,
+			`translate-${new Date().toISOString().replaceAll(":", "-")}.json`,
 		);
 	}
 

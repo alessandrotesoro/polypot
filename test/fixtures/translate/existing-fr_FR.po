@@ -1,0 +1,11 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: Polypot Fixture 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Language: fr-FR\n"
+"Plural-Forms: nplurals=2; plural=(n > 1);\n"
+
+#. Button label on product pages.
+#: includes/class-product.php:10
+msgid "Add to cart"
+msgstr "Ajouter au panier"

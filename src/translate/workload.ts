@@ -137,8 +137,11 @@ export interface TranslatePreviewWorkload {
 	readonly sourceStrings: number;
 }
 
-function getOutputFile(
-	options: TranslateWorkloadOptions,
+export function buildTranslateOutputFile(
+	options: Pick<
+		TranslateWorkloadOptions,
+		"localeFormat" | "outputDir" | "poFilePrefix"
+	>,
 	language: string,
 ): string {
 	return path.join(
@@ -296,7 +299,7 @@ export function buildTranslateWorkload(
 			batches,
 			estimate,
 			language,
-			outputFile: getOutputFile(options, language),
+			outputFile: buildTranslateOutputFile(options, language),
 			plannedStrings,
 			skippedByCost,
 			skippedByLimit,

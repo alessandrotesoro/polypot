@@ -7,11 +7,21 @@ import {
 	type ListrTask,
 } from "listr2";
 import color from "yoctocolors";
+import type { PolypotSecrets } from "../config/secrets.js";
 import { sanitizeTerminalText } from "../terminal.js";
+import {
+	type ExecuteTranslateOptions,
+	executeTranslate,
+	type TranslationProgressEvent,
+} from "./executor.js";
 import { analyzePotFile, type PotAnalysis } from "./pot.js";
+import type {
+	TranslationLanguageResult,
+	TranslationRunResult,
+	TranslationRunStatus,
+} from "./results.js";
 import {
 	buildTranslateWorkload,
-	type LanguageWorkPlan,
 	type LocaleFormat,
 	type TranslatePreviewWorkload,
 	type TranslationEstimate,
@@ -20,9 +30,10 @@ import {
 export type { TranslationEstimate } from "./workload.js";
 
 const PROGRESS_BAR_SIZE = 24;
-const PREVIEW_STEP_DELAY_MS = 650;
-const MAX_PREVIEW_PROGRESS_UPDATES = 20;
 const numberFormatter = new Intl.NumberFormat("en-US");
+type TranslateDebugEntry = NonNullable<
+	TranslationLanguageResult["debug"]
+>[number];
 
 interface TranslateUiPreviewOptions {
 	readonly batchSize: number;
@@ -100,19 +111,27 @@ export interface TranslateSettingsSnapshot {
 interface TranslateUiPlan {
 	readonly config: TranslateConfigSnapshot;
 	readonly preview: TranslateUiPreviewOptions;
+	readonly secrets: PolypotSecrets;
 	readonly settings: TranslateSettingsSnapshot;
 }
 
 export interface LanguagePreviewResult {
 	readonly batches: number;
+	readonly error?: string;
 	readonly estimate: TranslationEstimate;
+	readonly failed?: number;
 	readonly language: string;
+	readonly mergedFromExisting?: number;
 	readonly outputFile: string;
+	readonly skippedByExisting?: number;
 	readonly skippedByCost: number;
 	readonly skippedByLimit: number;
 	readonly sourceStrings: number;
+	readonly status?: string;
 	readonly strings: number;
 	readonly translated: number;
+	readonly validation?: TranslationLanguageResult["validation"];
+	readonly warning?: string;
 }
 
 export interface TranslateUiResult {
@@ -128,12 +147,13 @@ export interface TranslateUiResult {
 		readonly code:
 			| "missing_pot_file_path"
 			| "missing_target_languages"
-			| "pot_analysis_failed";
+			| "pot_analysis_failed"
+			| "unsupported_provider";
 		readonly message: string;
 		readonly potFilePath?: string;
 	};
-	readonly implemented: false;
-	readonly mode: "ui-preview";
+	readonly implemented: boolean;
+	readonly mode: "dry-run" | "translate";
 	readonly plan: {
 		readonly batchSize: number;
 		readonly dryRun: boolean;
@@ -151,8 +171,12 @@ export interface TranslateUiResult {
 		readonly sourceLanguage: string;
 	};
 	readonly results: readonly LanguagePreviewResult[];
-	readonly status: "blocked" | "previewed";
+	readonly status: "blocked" | TranslationRunStatus;
 	readonly summary: string;
+	readonly cost?: TranslationRunResult["cost"];
+	readonly debug?: readonly TranslateDebugEntry[];
+	readonly totals?: TranslationRunResult["totals"];
+	readonly validation?: TranslationRunResult["validation"];
 }
 
 const progressBarOptions: cliProgress.Options = {
@@ -219,16 +243,6 @@ function getRenderer(preview: TranslateUiPreviewOptions): ListrRendererValue {
 	return process.stdout.isTTY ? "default" : "verbose";
 }
 
-function getPreviewStepDelayMs(renderer: ListrRendererValue): number {
-	return renderer === "default" ? PREVIEW_STEP_DELAY_MS : 0;
-}
-
-function delay(ms: number): Promise<void> {
-	return new Promise((resolve) => {
-		setTimeout(resolve, ms);
-	});
-}
-
 function formatLimits(preview: TranslateUiPreviewOptions): string {
 	const limits = [
 		preview.maxStringsPerJob === undefined
@@ -243,10 +257,6 @@ function formatLimits(preview: TranslateUiPreviewOptions): string {
 	].filter((limit): limit is string => limit !== undefined);
 
 	return limits.length === 0 ? "none" : limits.join(" | ");
-}
-
-function getPreviewProgressUpdates(batches: number): number {
-	return Math.min(batches, MAX_PREVIEW_PROGRESS_UPDATES);
 }
 
 function formatPath(value: string): string {
@@ -265,105 +275,38 @@ function formatWorkload(workload: TranslatePreviewWorkload): string {
 	return `${formatNumber(workload.plannedStrings)} / ${formatNumber(workload.sourceStrings)} planned strings across ${formatCount(workload.batches, "batch", "batches")}`;
 }
 
-function formatLanguageTitle(
-	preview: TranslateUiPreviewOptions,
-	plan: LanguageWorkPlan,
-	processed: number,
-	phase: string,
-	startedAt: number,
-): string {
+function formatProgressLine(options: {
+	readonly language: string;
+	readonly outputFile: string;
+	readonly phase: string;
+	readonly plannedStrings: number;
+	readonly processedStrings: number;
+	readonly startedAt: number;
+}): string {
 	const percentage =
-		plan.plannedStrings > 0
-			? Math.round((processed / plan.plannedStrings) * 100)
+		options.plannedStrings > 0
+			? Math.round(
+					(options.processedStrings / options.plannedStrings) * 100,
+				)
 			: 100;
-	const elapsedMs = Date.now() - startedAt;
+	const elapsedMs = Date.now() - options.startedAt;
 	const etaMs =
-		processed > 0 && processed < plan.plannedStrings
-			? (elapsedMs / processed) * (plan.plannedStrings - processed)
+		options.processedStrings > 0 &&
+		options.processedStrings < options.plannedStrings
+			? (elapsedMs / options.processedStrings) *
+				(options.plannedStrings - options.processedStrings)
 			: 0;
 	const detail = [
-		phase,
+		options.phase,
 		`elapsed ${formatDuration(elapsedMs)}`,
 		`eta ${formatDuration(etaMs)}`,
-		preview.dryRun ? "dry run" : "preview",
-		`~${formatNumber(plan.estimate.totalTokens)} tokens`,
-		`~${formatCurrency(plan.estimate.cost)}`,
-		`output ${formatPath(plan.outputFile)}`,
+		`output ${formatPath(options.outputFile)}`,
 	].join(" | ");
 
 	return [
-		`${formatLanguage(plan.language)}  ${buildProgressBar(processed, plan.plannedStrings)}  ${formatNumber(processed)} / ${formatNumber(plan.plannedStrings)}  ${percentage}%`,
+		`${formatLanguage(options.language)}  ${buildProgressBar(options.processedStrings, options.plannedStrings)}  ${formatNumber(options.processedStrings)} / ${formatNumber(options.plannedStrings)}  ${percentage}%`,
 		`  ${color.dim(detail)}`,
 	].join("\n");
-}
-
-function buildLanguageTask(
-	preview: TranslateUiPreviewOptions,
-	plan: LanguageWorkPlan,
-	stepDelayMs: number,
-): ListrTask {
-	return {
-		title:
-			plan.plannedStrings === 0
-				? `${formatLanguage(plan.language)} skipped: no strings selected after limits`
-				: `${formatLanguage(plan.language)} queued (${plan.plannedStrings}/${plan.sourceStrings} strings planned)`,
-		task: async (_ctx, task): Promise<void> => {
-			if (plan.plannedStrings === 0) {
-				task.title = `${formatLanguage(plan.language)} skipped: ${plan.skippedByLimit} by limits, ${plan.skippedByCost} by cost`;
-				return;
-			}
-
-			const startedAt = Date.now();
-			task.title = formatLanguageTitle(
-				preview,
-				plan,
-				0,
-				"Preparing",
-				startedAt,
-			);
-			if (stepDelayMs > 0) await delay(stepDelayMs);
-
-			const progressUpdates = getPreviewProgressUpdates(plan.batches);
-			for (let update = 1; update <= progressUpdates; update += 1) {
-				const processed = Math.min(
-					Math.ceil((plan.plannedStrings * update) / progressUpdates),
-					plan.plannedStrings,
-				);
-				task.title = formatLanguageTitle(
-					preview,
-					plan,
-					processed,
-					`Batch ${Math.ceil((plan.batches * update) / progressUpdates)}/${plan.batches}`,
-					startedAt,
-				);
-				if (stepDelayMs > 0) await delay(stepDelayMs);
-			}
-
-			task.title = formatLanguageTitle(
-				preview,
-				plan,
-				plan.plannedStrings,
-				"Validating output",
-				startedAt,
-			);
-			if (stepDelayMs > 0) await delay(stepDelayMs);
-			task.title = `${formatLanguage(plan.language)}  ${buildProgressBar(plan.plannedStrings, plan.plannedStrings)}  ${formatNumber(plan.plannedStrings)} / ${formatNumber(plan.plannedStrings)}  100%\n  Preview complete | no translations written | output ${formatPath(plan.outputFile)}`;
-		},
-	};
-}
-
-function buildLanguageResult(plan: LanguageWorkPlan): LanguagePreviewResult {
-	return {
-		batches: plan.batches,
-		estimate: plan.estimate,
-		language: plan.language,
-		outputFile: plan.outputFile,
-		skippedByCost: plan.skippedByCost,
-		skippedByLimit: plan.skippedByLimit,
-		sourceStrings: plan.sourceStrings,
-		strings: plan.plannedStrings,
-		translated: 0,
-	};
 }
 
 function buildPreflight(
@@ -429,14 +372,27 @@ function buildSummaryFromWorkload(workload: TranslatePreviewWorkload): string {
 	].join("\n");
 }
 
+function appendDryRunSummary(
+	preview: TranslateUiPreviewOptions,
+	workload: TranslatePreviewWorkload,
+	result: TranslateUiResult,
+): TranslateUiResult {
+	if (!preview.dryRun || result.status !== "dry-run") return result;
+
+	return {
+		...result,
+		summary: `${buildSummaryFromWorkload(workload)}\n\n${result.summary}`,
+	};
+}
+
 function buildBaseResult(
 	plan: TranslateUiPlan,
 ): Omit<TranslateUiResult, "analysis" | "results" | "status" | "summary"> {
 	const { config, preview } = plan;
 
 	return {
-		implemented: false,
-		mode: "ui-preview",
+		implemented: true,
+		mode: preview.dryRun ? "dry-run" : "translate",
 		plan: {
 			batchSize: preview.batchSize,
 			dryRun: preview.dryRun,
@@ -460,6 +416,310 @@ function buildBaseResult(
 			sourceLanguage: preview.sourceLanguage,
 		},
 	};
+}
+
+function resolveTemperature(value: number | string): number {
+	if (typeof value === "number") return value;
+
+	const parsed = Number(value);
+	return Number.isFinite(parsed) ? parsed : 0.7;
+}
+
+function buildExecuteOptions(
+	plan: TranslateUiPlan,
+	onProgress?: (event: TranslationProgressEvent) => void,
+): ExecuteTranslateOptions {
+	const { config, preview, settings } = plan;
+	if (config.potFilePath === undefined) {
+		throw new Error("POT file path is required before translation starts.");
+	}
+
+	return {
+		abortOnFailure: settings.retries.abortOnFailure,
+		batchSize: preview.batchSize,
+		dictionaryPath: settings.behavior.dictionaryPath,
+		dryRun: preview.dryRun,
+		forceTranslate: config.forceTranslate,
+		jobs: preview.jobs,
+		localeFormat: preview.localeFormat,
+		maxRetries: settings.retries.maxRetries,
+		model: config.model,
+		outputDir: preview.outputDir,
+		potFilePath: config.potFilePath,
+		retryDelay: settings.retries.retryDelay,
+		saveDebugInfo: settings.debug.saveDebugInfo,
+		secrets: plan.secrets,
+		skipLanguageOnFailure: settings.retries.skipLanguageOnFailure,
+		sourceLanguage: preview.sourceLanguage,
+		targetLanguages: preview.languages,
+		temperature: resolveTemperature(settings.provider.temperature),
+		timeout: settings.performance.timeout,
+		useDictionary: settings.behavior.useDictionary,
+		...(onProgress !== undefined && { onProgress }),
+		...(settings.source.inputPoPath !== undefined && {
+			inputPoPath: settings.source.inputPoPath,
+		}),
+		...(settings.limits.maxCost !== undefined && {
+			maxCost: settings.limits.maxCost,
+		}),
+		...(settings.limits.maxStringsPerJob !== undefined && {
+			maxStringsPerJob: settings.limits.maxStringsPerJob,
+		}),
+		...(settings.limits.maxTotalStrings !== undefined && {
+			maxTotalStrings: settings.limits.maxTotalStrings,
+		}),
+		...(settings.provider.maxTokens !== undefined && {
+			maxTokens: settings.provider.maxTokens,
+		}),
+		...(settings.output.poFilePrefix !== undefined && {
+			poFilePrefix: settings.output.poFilePrefix,
+		}),
+		...(settings.behavior.poHeaderTemplatePath !== undefined && {
+			poHeaderTemplatePath: settings.behavior.poHeaderTemplatePath,
+		}),
+		...(settings.behavior.promptFilePath !== undefined && {
+			promptFilePath: settings.behavior.promptFilePath,
+		}),
+	};
+}
+
+function toUiLanguageResult(
+	language: TranslationLanguageResult,
+): LanguagePreviewResult {
+	return {
+		batches: language.batches,
+		estimate: {
+			cost: language.cost.totalCost,
+			inputTokens: language.cost.promptTokens,
+			outputTokens: language.cost.completionTokens,
+			totalTokens: language.cost.totalTokens,
+		},
+		language: language.language,
+		...(language.error !== undefined && { error: language.error }),
+		failed: language.failed,
+		mergedFromExisting: language.mergedFromExisting,
+		outputFile: language.outputFile,
+		skippedByExisting: language.skippedByExisting,
+		skippedByCost: language.skippedByCost,
+		skippedByLimit: language.skippedByLimit,
+		sourceStrings: language.sourceStrings,
+		status: language.status,
+		strings: language.plannedStrings,
+		translated: language.translated,
+		validation: language.validation,
+		...(language.warning !== undefined && { warning: language.warning }),
+	};
+}
+
+function toUiResult(
+	plan: TranslateUiPlan,
+	result: TranslationRunResult,
+): TranslateUiResult {
+	const baseResult = buildBaseResult(plan);
+
+	return {
+		...baseResult,
+		analysis: {
+			contextStrings: result.analysis.contextStrings,
+			filePath: result.analysis.filePath,
+			fuzzyStrings: result.analysis.fuzzyStrings,
+			pluralStrings: result.analysis.pluralStrings,
+			sourceCharacters: result.analysis.sourceCharacters,
+			totalStrings: result.analysis.totalStrings,
+		},
+		results: result.results.map(toUiLanguageResult),
+		status: result.status,
+		summary: result.summary,
+		cost: result.cost,
+		debug: result.results.flatMap((language) => language.debug ?? []),
+		totals: result.totals,
+		validation: result.validation,
+	};
+}
+
+interface ProgressState {
+	readonly outputFile: string;
+	readonly plannedStrings: number;
+	readonly processedStrings: number;
+	readonly phase: string;
+	readonly startedAt: number;
+}
+
+function updateProgressState(
+	states: Map<string, ProgressState>,
+	event: TranslationProgressEvent,
+	dryRun: boolean,
+): void {
+	const current = states.get(event.language);
+	const startedAt = current?.startedAt ?? Date.now();
+	const updateCurrent = (
+		update: (current: ProgressState) => ProgressState,
+	): void => {
+		if (current !== undefined) states.set(event.language, update(current));
+	};
+
+	switch (event.phase) {
+		case "language-queued":
+			states.set(event.language, {
+				outputFile: "",
+				phase: "Queued",
+				plannedStrings: 0,
+				processedStrings: 0,
+				startedAt,
+			});
+			return;
+		case "language-started":
+			states.set(event.language, {
+				outputFile: event.outputFile,
+				phase: "Preparing",
+				plannedStrings: event.plannedStrings,
+				processedStrings: 0,
+				startedAt,
+			});
+			return;
+		case "batch-started":
+			updateCurrent((state) => ({
+				...state,
+				phase: `Batch ${event.batch}/${event.totalBatches}`,
+			}));
+			return;
+		case "batch-skipped":
+			updateCurrent((state) => ({
+				...state,
+				phase: `Skipped batch ${event.batch}: ${event.reason}`,
+				plannedStrings: event.totalStrings,
+				processedStrings: state.processedStrings + event.skippedStrings,
+			}));
+			return;
+		case "batch-failed":
+			updateCurrent((state) => ({
+				...state,
+				phase: `Failed batch ${event.batch}`,
+				plannedStrings: event.totalStrings,
+				processedStrings: state.processedStrings + event.failedStrings,
+			}));
+			return;
+		case "batch-completed":
+			updateCurrent((state) => ({
+				...state,
+				phase: `${dryRun ? "Planned" : "Saved"} batch ${event.batch}`,
+				plannedStrings: event.totalStrings,
+				processedStrings: event.processedStrings,
+			}));
+			return;
+		case "batch-saved":
+			updateCurrent((state) => ({
+				...state,
+				phase: `Saved batch ${event.batch}`,
+			}));
+			return;
+		case "validation-issues":
+			updateCurrent((state) => ({
+				...state,
+				phase: `${event.issues} validation issue${event.issues === 1 ? "" : "s"}`,
+			}));
+			return;
+		case "language-completed":
+			updateCurrent((state) => ({
+				...state,
+				phase: event.status,
+				processedStrings:
+					event.status === "completed" || event.status === "dry-run"
+						? state.plannedStrings
+						: state.processedStrings,
+			}));
+			return;
+		default: {
+			const _exhaustive: never = event;
+			throw new Error(`Unhandled progress event: ${String(_exhaustive)}`);
+		}
+	}
+}
+
+function formatExecutionTitle(
+	languages: readonly string[],
+	states: ReadonlyMap<string, ProgressState>,
+): string {
+	const lines = languages.map((language) => {
+		const state = states.get(language);
+		if (state === undefined) return `${formatLanguage(language)} queued`;
+		if (state.phase === "Queued") {
+			return `${formatLanguage(language)} queued`;
+		}
+
+		return formatProgressLine({
+			language,
+			outputFile: state.outputFile,
+			phase: state.phase,
+			plannedStrings: state.plannedStrings,
+			processedStrings: state.processedStrings,
+			startedAt: state.startedAt,
+		});
+	});
+
+	return lines.join("\n");
+}
+
+async function runTranslateExecution(
+	plan: TranslateUiPlan,
+	renderer: ListrRendererValue,
+): Promise<TranslateUiResult> {
+	if (renderer === "silent") {
+		return toUiResult(
+			plan,
+			await executeTranslate(buildExecuteOptions(plan)),
+		);
+	}
+
+	const states = new Map<string, ProgressState>();
+	let executionResult: TranslationRunResult | undefined;
+	const tasks: ListrTask[] = [
+		{
+			title: formatExecutionTitle(plan.preview.languages, states),
+			task: async (_ctx, task): Promise<void> => {
+				const options = buildExecuteOptions(plan, (event) => {
+					updateProgressState(states, event, plan.preview.dryRun);
+					task.title = formatExecutionTitle(
+						plan.preview.languages,
+						states,
+					);
+				});
+				executionResult = await executeTranslate(options);
+				task.title = formatExecutionTitle(
+					plan.preview.languages,
+					states,
+				);
+			},
+		},
+	];
+	const runnerOptions = {
+		concurrent: false,
+		exitOnError: false,
+		renderer,
+		rendererOptions:
+			renderer === "verbose"
+				? { logTitleChange: true }
+				: {
+						collapseErrors: false,
+						formatOutput: "wrap",
+						showTimer: true,
+					},
+	} satisfies ListrBaseClassOptions<
+		unknown,
+		ListrRendererValue,
+		ListrRendererValue
+	>;
+	const runner = new Listr<unknown, ListrRendererValue, ListrRendererValue>(
+		tasks,
+		runnerOptions,
+	);
+
+	await runner.run();
+	if (executionResult === undefined) {
+		throw new Error("Translation execution did not return a result.");
+	}
+
+	return toUiResult(plan, executionResult);
 }
 
 export async function runTranslateUiPreview(
@@ -500,6 +760,21 @@ export async function runTranslateUiPreview(
 		};
 	}
 
+	if (config.provider !== "openai") {
+		const message = `Provider ${sanitizeTerminalText(config.provider)} is not supported by translate yet. Use --provider openai.`;
+
+		return {
+			...baseResult,
+			error: {
+				code: "unsupported_provider",
+				message,
+			},
+			results: [],
+			status: "blocked",
+			summary: message,
+		};
+	}
+
 	const renderer = getRenderer(preview);
 	let analysis: PotAnalysis;
 	try {
@@ -521,53 +796,18 @@ export async function runTranslateUiPreview(
 	}
 
 	const workload = buildTranslateWorkload(preview, analysis);
-	const results = workload.languages.map(buildLanguageResult);
-	const result: TranslateUiResult = {
-		...baseResult,
-		analysis: {
-			contextStrings: analysis.contextStrings,
-			filePath: analysis.filePath,
-			fuzzyStrings: analysis.fuzzyStrings,
-			pluralStrings: analysis.pluralStrings,
-			sourceCharacters: analysis.sourceCharacters,
-			totalStrings: analysis.totalStrings,
-		},
-		results,
-		status: "previewed",
-		summary: buildSummaryFromWorkload(workload),
-	};
-
-	if (renderer === "silent") return result;
+	if (renderer === "silent") {
+		return appendDryRunSummary(
+			preview,
+			workload,
+			await runTranslateExecution(plan, renderer),
+		);
+	}
 
 	process.stdout.write(buildPreflight(preview, workload));
-
-	const stepDelayMs = getPreviewStepDelayMs(renderer);
-	const tasks = workload.languages.map((language) =>
-		buildLanguageTask(preview, language, stepDelayMs),
+	return appendDryRunSummary(
+		preview,
+		workload,
+		await runTranslateExecution(plan, renderer),
 	);
-	const runnerOptions = {
-		concurrent: getConcurrentJobs(preview),
-		exitOnError: false,
-		renderer,
-		rendererOptions:
-			renderer === "verbose"
-				? { logTitleChange: true }
-				: {
-						collapseErrors: false,
-						formatOutput: "wrap",
-						showTimer: true,
-					},
-	} satisfies ListrBaseClassOptions<
-		unknown,
-		ListrRendererValue,
-		ListrRendererValue
-	>;
-	const runner = new Listr<unknown, ListrRendererValue, ListrRendererValue>(
-		tasks,
-		runnerOptions,
-	);
-
-	await runner.run();
-
-	return result;
 }

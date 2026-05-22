@@ -1,0 +1,168 @@
+import { expect } from "chai";
+import { APIError } from "openai";
+import type {
+	OpenAIChatCompletionResponse,
+	OpenAITranslationClient,
+} from "../../../src/providers/openai/translate.js";
+import { translateOpenAIBatch } from "../../../src/providers/openai/translate.js";
+import type { PotEntry } from "../../../src/translate/pot.js";
+
+function entry(msgid: string): PotEntry {
+	return {
+		characters: msgid.length,
+		context: "",
+		flags: [],
+		key: `\u0004${msgid}`,
+		msgid,
+		msgstr: [""],
+		obsolete: false,
+		plural: false,
+		references: [],
+	};
+}
+
+function buildOptions(
+	overrides: Partial<Parameters<typeof translateOpenAIBatch>[0]> = {},
+): Parameters<typeof translateOpenAIBatch>[0] {
+	return {
+		apiKey: "sk-test",
+		dryRun: false,
+		entries: [entry("Hello")],
+		maxRetries: 0,
+		model: "gpt-5.4-mini",
+		pluralCount: 2,
+		promptTemplate: "Translate {{SOURCE_LANGUAGE}} to {{TARGET_LANGUAGE}}.",
+		retryDelayMs: 0,
+		sourceLanguage: "en_US",
+		targetLanguage: "fr_FR",
+		temperature: 0.1,
+		timeoutSeconds: 60,
+		...overrides,
+	};
+}
+
+function clientFactory(options: {
+	readonly calls: unknown[];
+	readonly fail?: () => Error | undefined;
+	readonly response?: OpenAIChatCompletionResponse;
+}): () => OpenAITranslationClient {
+	return () => ({
+		chat: {
+			completions: {
+				create: async (body) => {
+					options.calls.push(body);
+					const failure = options.fail?.();
+					if (failure !== undefined) throw failure;
+
+					return (
+						options.response ?? {
+							choices: [
+								{
+									message: {
+										content: '<t i="1">Bonjour</t>',
+									},
+								},
+							],
+							usage: {
+								completion_tokens: 5,
+								prompt_tokens: 10,
+								total_tokens: 15,
+							},
+						}
+					);
+				},
+			},
+		},
+	});
+}
+
+describe("translateOpenAIBatch", () => {
+	it("translates a batch with an injected client", async () => {
+		const calls: unknown[] = [];
+		const result = await translateOpenAIBatch(
+			buildOptions({ maxTokens: 500 }),
+			clientFactory({ calls }),
+		);
+
+		expect(result.ok).to.equal(true);
+		if (!result.ok) throw new Error(result.error);
+		expect(result.translations[0]?.msgstr).to.deep.equal(["Bonjour"]);
+		expect(result.cost.totalTokens).to.equal(15);
+		expect(calls[0] as Record<string, unknown>).to.deep.include({
+			max_tokens: 500,
+			model: "gpt-5.4-mini",
+			temperature: 0.1,
+		});
+	});
+
+	it("does not create a request during dry-run", async () => {
+		const calls: unknown[] = [];
+		const result = await translateOpenAIBatch(
+			buildOptions({ dryRun: true }),
+			clientFactory({ calls }),
+		);
+
+		expect(result.ok).to.equal(true);
+		if (!result.ok) throw new Error(result.error);
+		expect(calls).to.deep.equal([]);
+		expect(result.dryRun).to.equal(true);
+		expect(result.missingEntries.map((item) => item.msgid)).to.deep.equal([
+			"Hello",
+		]);
+		expect(result.cost.totalTokens).to.be.greaterThan(0);
+	});
+
+	it("blocks non-dry-run translation when the API key is missing", async () => {
+		const { apiKey: _apiKey, ...options } = buildOptions();
+		const result = await translateOpenAIBatch(
+			options,
+			clientFactory({ calls: [] }),
+		);
+
+		expect(result).to.deep.equal({
+			error: "OpenAI API key is required for translation.",
+			ok: false,
+			retryable: false,
+		});
+	});
+
+	it("retries transient failures", async () => {
+		const calls: unknown[] = [];
+		let attempts = 0;
+		const result = await translateOpenAIBatch(
+			buildOptions({ maxRetries: 1 }),
+			clientFactory({
+				calls,
+				fail: () => {
+					attempts += 1;
+					return attempts === 1
+						? new Error("temporary failure")
+						: undefined;
+				},
+			}),
+		);
+
+		expect(result.ok).to.equal(true);
+		expect(calls).to.have.length(2);
+	});
+
+	it("does not retry authentication failures", async () => {
+		const calls: unknown[] = [];
+		const result = await translateOpenAIBatch(
+			buildOptions({ maxRetries: 3 }),
+			clientFactory({
+				calls,
+				fail: () =>
+					new APIError(
+						401,
+						{ message: "bad key" },
+						"bad key",
+						new Headers(),
+					),
+			}),
+		);
+
+		expect(result.ok).to.equal(false);
+		expect(calls).to.have.length(1);
+	});
+});
