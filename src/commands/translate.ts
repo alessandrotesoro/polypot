@@ -370,6 +370,10 @@ each target language.
 			}
 		}
 
+		if (finalResult.status === "blocked") {
+			process.exitCode = 1;
+		}
+
 		return finalResult;
 	}
 
@@ -500,7 +504,11 @@ each target language.
 			this.flags["save-debug-info"] ?? this.appConfig.debug.saveDebugInfo;
 		if (!saveDebugInfo) return undefined;
 
-		const debugDirectory = path.join(process.cwd(), ".polypot", "debug");
+		const projectDirectory =
+			this.flags.config === undefined
+				? process.cwd()
+				: getExplicitConfigProjectDirectory(this.flags.config);
+		const debugDirectory = path.join(projectDirectory, ".polypot", "debug");
 		return path.join(
 			debugDirectory,
 			`translate-preview-${new Date().toISOString().replaceAll(":", "-")}.json`,

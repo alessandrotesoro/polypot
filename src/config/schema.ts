@@ -36,7 +36,9 @@ const OutputConfig = z.object({
 	outputFormat: z.string().default("console"),
 	outputFile: z.string().optional(),
 	poFilePrefix: z.string().optional(),
-	localeFormat: z.string().default("target_lang"),
+	localeFormat: z
+		.enum(["wp_locale", "iso_639_1", "iso_639_2", "target_lang"])
+		.default("target_lang"),
 });
 
 const BehaviorConfig = z.object({

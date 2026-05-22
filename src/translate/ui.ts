@@ -8,17 +8,19 @@ import {
 } from "listr2";
 import color from "yoctocolors";
 import { sanitizeTerminalText } from "../terminal.js";
+import { analyzePotFile, type PotAnalysis } from "./pot.js";
 import {
-	analyzePotFile,
-	type PotAnalysis,
-	type PotSourceString,
-} from "./pot.js";
+	buildTranslateWorkload,
+	type LanguageWorkPlan,
+	type TranslatePreviewWorkload,
+	type TranslationEstimate,
+} from "./workload.js";
+
+export type { TranslationEstimate } from "./workload.js";
 
 const PROGRESS_BAR_SIZE = 24;
 const PREVIEW_STEP_DELAY_MS = 650;
-const ESTIMATED_CHARS_PER_TOKEN = 4;
-const ESTIMATED_OUTPUT_TOKEN_MULTIPLIER = 1.35;
-const PREVIEW_COST_PER_1000_TOKENS = 0.002;
+const MAX_PREVIEW_PROGRESS_UPDATES = 20;
 const numberFormatter = new Intl.NumberFormat("en-US");
 
 interface TranslateUiPreviewOptions {
@@ -99,35 +101,6 @@ interface TranslateUiPlan {
 	readonly settings: TranslateSettingsSnapshot;
 }
 
-interface TranslationEstimate {
-	readonly cost: number;
-	readonly inputTokens: number;
-	readonly outputTokens: number;
-	readonly totalTokens: number;
-}
-
-interface LanguageWorkPlan {
-	readonly batches: number;
-	readonly estimate: TranslationEstimate;
-	readonly language: string;
-	readonly outputFile: string;
-	readonly plannedStrings: number;
-	readonly skippedByCost: number;
-	readonly skippedByLimit: number;
-	readonly sourceStrings: number;
-}
-
-interface TranslatePreviewWorkload {
-	readonly analysis: PotAnalysis;
-	readonly batches: number;
-	readonly estimate: TranslationEstimate;
-	readonly languages: readonly LanguageWorkPlan[];
-	readonly plannedStrings: number;
-	readonly skippedByCost: number;
-	readonly skippedByLimit: number;
-	readonly sourceStrings: number;
-}
-
 export interface LanguagePreviewResult {
 	readonly batches: number;
 	readonly estimate: TranslationEstimate;
@@ -150,9 +123,12 @@ export interface TranslateUiResult {
 		readonly totalStrings: number;
 	};
 	readonly error?: {
-		readonly code: "pot_analysis_failed";
+		readonly code:
+			| "missing_pot_file_path"
+			| "missing_target_languages"
+			| "pot_analysis_failed";
 		readonly message: string;
-		readonly potFilePath: string;
+		readonly potFilePath?: string;
 	};
 	readonly implemented: false;
 	readonly mode: "ui-preview";
@@ -190,17 +166,9 @@ function buildProgressBar(value: number, total: number): string {
 	return cliProgress.Format.BarFormat(progress, progressBarOptions);
 }
 
-function getOutputFile(
-	preview: TranslateUiPreviewOptions,
-	language: string,
-): string {
-	return path.join(
-		preview.outputDir,
-		`${preview.poFilePrefix ?? ""}${language}.po`,
-	);
-}
-
 function formatCurrency(value: number): string {
+	if (value > 0 && value < 0.0001) return "<$0.0001";
+
 	return `$${value.toFixed(4)}`;
 }
 
@@ -236,150 +204,6 @@ function formatDuration(ms: number): string {
 
 function formatError(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
-}
-
-function estimateSourceCharacters(
-	sourceCharacters: number,
-): TranslationEstimate {
-	const inputTokens = Math.ceil(sourceCharacters / ESTIMATED_CHARS_PER_TOKEN);
-	const outputTokens = Math.ceil(
-		inputTokens * ESTIMATED_OUTPUT_TOKEN_MULTIPLIER,
-	);
-	const totalTokens = inputTokens + outputTokens;
-
-	return {
-		cost: (totalTokens / 1000) * PREVIEW_COST_PER_1000_TOKENS,
-		inputTokens,
-		outputTokens,
-		totalTokens,
-	};
-}
-
-function addEstimates(
-	first: TranslationEstimate,
-	second: TranslationEstimate,
-): TranslationEstimate {
-	return {
-		cost: first.cost + second.cost,
-		inputTokens: first.inputTokens + second.inputTokens,
-		outputTokens: first.outputTokens + second.outputTokens,
-		totalTokens: first.totalTokens + second.totalTokens,
-	};
-}
-
-function buildPrefixCharacterTotals(
-	sourceStrings: readonly PotSourceString[],
-): readonly number[] {
-	const totals = [0];
-	for (const sourceString of sourceStrings) {
-		totals.push((totals.at(-1) ?? 0) + sourceString.characters);
-	}
-
-	return totals;
-}
-
-function estimatePrefix(
-	prefixCharacterTotals: readonly number[],
-	count: number,
-): TranslationEstimate {
-	return estimateSourceCharacters(prefixCharacterTotals[count] ?? 0);
-}
-
-function selectStringCountWithinBudget(
-	prefixCharacterTotals: readonly number[],
-	maxCount: number,
-	remainingCost: number,
-): number {
-	if (remainingCost <= 0) return 0;
-
-	let low = 0;
-	let high = maxCount;
-
-	while (low < high) {
-		const middle = Math.ceil((low + high) / 2);
-		if (
-			estimatePrefix(prefixCharacterTotals, middle).cost <= remainingCost
-		) {
-			low = middle;
-		} else {
-			high = middle - 1;
-		}
-	}
-
-	return low;
-}
-
-function buildWorkload(
-	preview: TranslateUiPreviewOptions,
-	analysis: PotAnalysis,
-): TranslatePreviewWorkload {
-	let remainingStrings = preview.maxTotalStrings ?? Number.POSITIVE_INFINITY;
-	let remainingCost = preview.maxCost ?? Number.POSITIVE_INFINITY;
-	const prefixCharacterTotals = buildPrefixCharacterTotals(analysis.strings);
-	const languages: LanguageWorkPlan[] = [];
-	let totalBatches = 0;
-	let totalEstimate: TranslationEstimate = {
-		cost: 0,
-		inputTokens: 0,
-		outputTokens: 0,
-		totalTokens: 0,
-	};
-	let totalPlannedStrings = 0;
-	let totalSkippedByCost = 0;
-	let totalSkippedByLimit = 0;
-
-	for (const language of preview.languages) {
-		const stringLimit = Math.min(
-			analysis.totalStrings,
-			preview.maxStringsPerJob ?? analysis.totalStrings,
-			remainingStrings,
-		);
-		const plannedStrings =
-			preview.maxCost === undefined
-				? stringLimit
-				: selectStringCountWithinBudget(
-						prefixCharacterTotals,
-						stringLimit,
-						remainingCost,
-					);
-		const estimate = estimatePrefix(prefixCharacterTotals, plannedStrings);
-		const batches =
-			plannedStrings === 0
-				? 0
-				: Math.ceil(plannedStrings / preview.batchSize);
-		const skippedByCost = stringLimit - plannedStrings;
-		const skippedByLimit = analysis.totalStrings - stringLimit;
-
-		remainingStrings -= plannedStrings;
-		remainingCost -= estimate.cost;
-		totalBatches += batches;
-		totalEstimate = addEstimates(totalEstimate, estimate);
-		totalPlannedStrings += plannedStrings;
-		totalSkippedByCost += skippedByCost;
-		totalSkippedByLimit += skippedByLimit;
-
-		languages.push({
-			batches,
-			estimate,
-			language,
-			outputFile: getOutputFile(preview, language),
-			plannedStrings,
-			skippedByCost,
-			skippedByLimit,
-			sourceStrings: analysis.totalStrings,
-		});
-	}
-
-	return {
-		analysis,
-		batches: totalBatches,
-		estimate: totalEstimate,
-		languages,
-		plannedStrings: totalPlannedStrings,
-		skippedByCost: totalSkippedByCost,
-		skippedByLimit: totalSkippedByLimit,
-		sourceStrings: analysis.totalStrings * preview.languages.length,
-	};
 }
 
 function getConcurrentJobs(preview: TranslateUiPreviewOptions): number {
@@ -419,7 +243,15 @@ function formatLimits(preview: TranslateUiPreviewOptions): string {
 	return limits.length === 0 ? "none" : limits.join(" | ");
 }
 
+function getPreviewProgressUpdates(batches: number): number {
+	return Math.min(batches, MAX_PREVIEW_PROGRESS_UPDATES);
+}
+
 function formatPath(value: string): string {
+	return sanitizeTerminalText(value);
+}
+
+function formatLanguage(value: string): string {
 	return sanitizeTerminalText(value);
 }
 
@@ -458,7 +290,7 @@ function formatLanguageTitle(
 	].join(" | ");
 
 	return [
-		`${plan.language}  ${buildProgressBar(processed, plan.plannedStrings)}  ${formatNumber(processed)} / ${formatNumber(plan.plannedStrings)}  ${percentage}%`,
+		`${formatLanguage(plan.language)}  ${buildProgressBar(processed, plan.plannedStrings)}  ${formatNumber(processed)} / ${formatNumber(plan.plannedStrings)}  ${percentage}%`,
 		`  ${color.dim(detail)}`,
 	].join("\n");
 }
@@ -471,11 +303,11 @@ function buildLanguageTask(
 	return {
 		title:
 			plan.plannedStrings === 0
-				? `${plan.language} skipped: no strings selected after limits`
-				: `${plan.language} queued (${plan.plannedStrings}/${plan.sourceStrings} strings planned)`,
+				? `${formatLanguage(plan.language)} skipped: no strings selected after limits`
+				: `${formatLanguage(plan.language)} queued (${plan.plannedStrings}/${plan.sourceStrings} strings planned)`,
 		task: async (_ctx, task): Promise<void> => {
 			if (plan.plannedStrings === 0) {
-				task.title = `${plan.language} skipped: ${plan.skippedByLimit} by limits, ${plan.skippedByCost} by cost`;
+				task.title = `${formatLanguage(plan.language)} skipped: ${plan.skippedByLimit} by limits, ${plan.skippedByCost} by cost`;
 				return;
 			}
 
@@ -489,16 +321,17 @@ function buildLanguageTask(
 			);
 			if (stepDelayMs > 0) await delay(stepDelayMs);
 
-			for (let batch = 1; batch <= plan.batches; batch += 1) {
+			const progressUpdates = getPreviewProgressUpdates(plan.batches);
+			for (let update = 1; update <= progressUpdates; update += 1) {
 				const processed = Math.min(
-					batch * preview.batchSize,
+					Math.ceil((plan.plannedStrings * update) / progressUpdates),
 					plan.plannedStrings,
 				);
 				task.title = formatLanguageTitle(
 					preview,
 					plan,
 					processed,
-					`Batch ${batch}/${plan.batches}`,
+					`Batch ${Math.ceil((plan.batches * update) / progressUpdates)}/${plan.batches}`,
 					startedAt,
 				);
 				if (stepDelayMs > 0) await delay(stepDelayMs);
@@ -512,7 +345,7 @@ function buildLanguageTask(
 				startedAt,
 			);
 			if (stepDelayMs > 0) await delay(stepDelayMs);
-			task.title = `${plan.language}  ${buildProgressBar(plan.plannedStrings, plan.plannedStrings)}  ${formatNumber(plan.plannedStrings)} / ${formatNumber(plan.plannedStrings)}  100%\n  Preview complete | no translations written | output ${formatPath(plan.outputFile)}`;
+			task.title = `${formatLanguage(plan.language)}  ${buildProgressBar(plan.plannedStrings, plan.plannedStrings)}  ${formatNumber(plan.plannedStrings)} / ${formatNumber(plan.plannedStrings)}  100%\n  Preview complete | no translations written | output ${formatPath(plan.outputFile)}`;
 		},
 	};
 }
@@ -546,7 +379,7 @@ function buildPreflight(
 		row("Details", formatSourceDetails(analysis)),
 		"",
 		color.bold("Plan"),
-		row("Targets", preview.languages.join(", ")),
+		row("Targets", preview.languages.map(formatLanguage).join(", ")),
 		row("Workload", formatWorkload(workload)),
 		row(
 			"Runtime",
@@ -563,7 +396,11 @@ function buildPreflight(
 
 function buildSummaryFromWorkload(workload: TranslatePreviewWorkload): string {
 	const languageLines = workload.languages.map((language) =>
-		row(language.language, formatPath(language.outputFile), 9),
+		row(
+			formatLanguage(language.language),
+			formatPath(language.outputFile),
+			9,
+		),
 	);
 
 	return [
@@ -630,22 +467,34 @@ export async function runTranslateUiPreview(
 	const baseResult = buildBaseResult(plan);
 
 	if (preview.languages.length === 0) {
+		const message =
+			"No target languages are configured. Add --target-languages or set source.targetLanguages in Polypot config.";
+
 		return {
 			...baseResult,
+			error: {
+				code: "missing_target_languages",
+				message,
+			},
 			results: [],
 			status: "blocked",
-			summary:
-				"No target languages are configured. Add --target-languages or set source.targetLanguages in Polypot config.",
+			summary: message,
 		};
 	}
 
 	if (config.potFilePath === undefined) {
+		const message =
+			"No POT file path is configured. Add --pot-file-path or set source.potFilePath in Polypot config.";
+
 		return {
 			...baseResult,
+			error: {
+				code: "missing_pot_file_path",
+				message,
+			},
 			results: [],
 			status: "blocked",
-			summary:
-				"No POT file path is configured. Add --pot-file-path or set source.potFilePath in Polypot config.",
+			summary: message,
 		};
 	}
 
@@ -669,7 +518,7 @@ export async function runTranslateUiPreview(
 		};
 	}
 
-	const workload = buildWorkload(preview, analysis);
+	const workload = buildTranslateWorkload(preview, analysis);
 	const results = workload.languages.map(buildLanguageResult);
 	const result: TranslateUiResult = {
 		...baseResult,

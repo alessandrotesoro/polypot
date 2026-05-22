@@ -1,7 +1,14 @@
 const PATH_LIKE_LANGUAGE_PATTERN = /[\\/]|(^[a-zA-Z]:)|\.\./;
 
 export const LANGUAGE_VALUE_ERROR =
-	"Language values cannot be blank or contain path separators, drive prefixes, or dot segments.";
+	"Language values cannot be blank or contain path separators, drive prefixes, dot segments, or control characters.";
+
+function hasControlCharacter(value: string): boolean {
+	return Array.from(value).some((character) => {
+		const code = character.charCodeAt(0);
+		return code < 32 || code === 127;
+	});
+}
 
 export function isSafeLanguageValue(value: string): boolean {
 	const normalized = value.trim();
@@ -9,6 +16,7 @@ export function isSafeLanguageValue(value: string): boolean {
 	return (
 		normalized.length > 0 &&
 		normalized === value &&
+		!hasControlCharacter(normalized) &&
 		!PATH_LIKE_LANGUAGE_PATTERN.test(normalized)
 	);
 }

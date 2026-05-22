@@ -72,6 +72,7 @@ describe("polypot translate", () => {
 	const tempDirs: string[] = [];
 
 	afterEach(async () => {
+		process.exitCode = undefined;
 		await Promise.all(
 			tempDirs
 				.splice(0)
@@ -223,7 +224,14 @@ describe("polypot translate", () => {
 	});
 
 	it("rejects path-like target language values", async () => {
-		const invalidValues = ["../escape", "fr/FR", "fr\\FR", "", "C:fr_FR"];
+		const invalidValues = [
+			"../escape",
+			"fr/FR",
+			"fr\\FR",
+			"",
+			"C:fr_FR",
+			"fr_\u001B[31mFR",
+		];
 
 		for (const language of invalidValues) {
 			const { error } = await runCommand([
@@ -656,6 +664,26 @@ describe("polypot translate", () => {
 		expect(stdout).to.include("No target languages are configured");
 	});
 
+	it("returns a machine-readable blocker when target languages are missing", async () => {
+		const { stdout } = await runCommand([
+			"translate",
+			"--json",
+			"-p",
+			"foo.pot",
+			"--dry-run",
+		]);
+		const result = JSON.parse(stdout) as {
+			readonly error: {
+				readonly code: string;
+			};
+			readonly status: string;
+		};
+
+		expect(process.exitCode).to.equal(1);
+		expect(result.status).to.equal("blocked");
+		expect(result.error.code).to.equal("missing_target_languages");
+	});
+
 	it("returns structured JSON when the POT file cannot be read", async () => {
 		const missingPotFile = path.join(
 			os.tmpdir(),
@@ -809,7 +837,7 @@ describe("polypot translate", () => {
 			const configPath = path.join(projectDir, ".polypot", "config.yaml");
 			await fs.writeFile(
 				configPath,
-				"source:\n  potFilePath: messages.pot\n  targetLanguages:\n    - fr_FR\n",
+				"source:\n  potFilePath: messages.pot\n  targetLanguages:\n    - fr_FR\ndebug:\n  saveDebugInfo: true\n",
 			);
 			process.chdir(otherDir);
 
@@ -824,6 +852,7 @@ describe("polypot translate", () => {
 				readonly analysis: {
 					readonly filePath: string;
 				};
+				readonly debugOutputFile: string;
 				readonly status: string;
 			};
 
@@ -832,6 +861,10 @@ describe("polypot translate", () => {
 			expect(result.analysis.filePath).to.equal(
 				path.join(projectDir, "messages.pot"),
 			);
+			expect(result.debugOutputFile).to.include(
+				path.join(projectDir, ".polypot", "debug"),
+			);
+			await fs.access(result.debugOutputFile);
 		} finally {
 			process.chdir(previousCwd);
 			await fs.rm(projectDir, { recursive: true, force: true });

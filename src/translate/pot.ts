@@ -10,11 +10,9 @@ export interface PotSourceString {
 }
 
 export interface PotAnalysis {
-	readonly charset: string;
 	readonly contextStrings: number;
 	readonly filePath: string;
 	readonly fuzzyStrings: number;
-	readonly headers: Readonly<Record<string, string>>;
 	readonly pluralStrings: number;
 	readonly sourceCharacters: number;
 	readonly strings: readonly PotSourceString[];
@@ -61,25 +59,23 @@ export async function analyzePotFile(filePath: string): Promise<PotAnalysis> {
 		strings: [] as PotSourceString[],
 	};
 
-	for (const translation of Object.values(parsed.translations).flatMap(
-		(context) => Object.values(context),
-	)) {
-		if (!isSourceEntry(translation)) continue;
+	for (const context of Object.values(parsed.translations)) {
+		for (const translation of Object.values(context)) {
+			if (!isSourceEntry(translation)) continue;
 
-		const sourceString = toSourceString(translation);
-		stats.strings.push(sourceString);
-		stats.sourceCharacters += sourceString.characters;
-		if (sourceString.context !== undefined) stats.contextStrings += 1;
-		if (sourceString.flags.includes("fuzzy")) stats.fuzzyStrings += 1;
-		if (sourceString.plural) stats.pluralStrings += 1;
+			const sourceString = toSourceString(translation);
+			stats.strings.push(sourceString);
+			stats.sourceCharacters += sourceString.characters;
+			if (sourceString.context !== undefined) stats.contextStrings += 1;
+			if (sourceString.flags.includes("fuzzy")) stats.fuzzyStrings += 1;
+			if (sourceString.plural) stats.pluralStrings += 1;
+		}
 	}
 
 	return {
-		charset: parsed.charset,
 		contextStrings: stats.contextStrings,
 		filePath,
 		fuzzyStrings: stats.fuzzyStrings,
-		headers: parsed.headers,
 		pluralStrings: stats.pluralStrings,
 		sourceCharacters: stats.sourceCharacters,
 		strings: stats.strings,
