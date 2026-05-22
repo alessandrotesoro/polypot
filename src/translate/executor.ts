@@ -10,9 +10,10 @@ import {
 } from "../providers/openai/translate.js";
 import { buildTranslationBatchPlan, type TranslationBatch } from "./batches.js";
 import {
-	findDictionaryMatches,
+	createDictionaryMatcher,
+	type DictionaryLoadResult,
+	type DictionaryMatcher,
 	loadDictionary,
-	type TranslationDictionary,
 } from "./dictionary.js";
 import { getBaseLanguage } from "./locales.js";
 import {
@@ -178,6 +179,26 @@ function buildOutputFile(
 	);
 }
 
+function assertUniqueOutputFiles(options: ExecuteTranslateOptions): void {
+	const languagesByFile = new Map<string, string[]>();
+
+	for (const language of options.targetLanguages) {
+		const outputFile = buildOutputFile(options, language);
+		languagesByFile.set(outputFile, [
+			...(languagesByFile.get(outputFile) ?? []),
+			language,
+		]);
+	}
+
+	for (const [outputFile, languages] of languagesByFile) {
+		if (languages.length > 1) {
+			throw new Error(
+				`Multiple target languages resolve to the same output file ${outputFile}: ${languages.join(", ")}.`,
+			);
+		}
+	}
+}
+
 function buildFailedLanguageResult(options: {
 	readonly error: unknown;
 	readonly executeOptions: ExecuteTranslateOptions;
@@ -213,11 +234,11 @@ function isSameBaseLanguage(
 }
 
 function getValidationIssueCount(stats: TranslationValidationStats): number {
-	return (
-		stats.placeholderMismatches +
-		stats.pluralFormIssues +
-		stats.blankedStrings.length
-	);
+	return stats.blankedStrings.length;
+}
+
+function getInvalidEntryKeys(stats: TranslationValidationStats): Set<string> {
+	return new Set(stats.blankedStrings.map((issue) => issue.entryKey));
 }
 
 function getBatchDebug(options: {
@@ -225,7 +246,7 @@ function getBatchDebug(options: {
 	readonly result: OpenAITranslateBatchResult;
 	readonly targetLanguage: string;
 }): TranslationBatchDebug | undefined {
-	if (!options.result.ok) return undefined;
+	if (options.result.debug === undefined) return undefined;
 
 	return {
 		batch: options.batch,
@@ -248,6 +269,15 @@ function shouldSkipBatchForCost(options: {
 		options.currentCost.totalCost + options.batchCost.totalCost >
 		options.maxCost
 	);
+}
+
+function countBatchEntriesFrom(
+	batches: readonly TranslationBatch[],
+	batchNumber: number,
+): number {
+	return batches
+		.filter((batch) => batch.number >= batchNumber)
+		.reduce((total, batch) => total + batch.entries.length, 0);
 }
 
 function emitBatchFailure(options: {
@@ -310,20 +340,18 @@ async function getExistingPoPath(
 async function loadDictionaryIfEnabled(
 	options: ExecuteTranslateOptions,
 	language: string,
-): Promise<TranslationDictionary> {
-	if (!options.useDictionary) return {};
+): Promise<DictionaryLoadResult> {
+	if (!options.useDictionary) return { dictionary: {} };
 
-	return (
-		await loadDictionary({
-			dictionaryPath: options.dictionaryPath,
-			targetLanguage: language,
-		})
-	).dictionary;
+	return loadDictionary({
+		dictionaryPath: options.dictionaryPath,
+		targetLanguage: language,
+	});
 }
 
 async function processProviderBatch(options: {
 	readonly batch: TranslationBatch;
-	readonly dictionary: TranslationDictionary;
+	readonly dictionaryMatcher: DictionaryMatcher;
 	readonly executeOptions: ExecuteTranslateOptions;
 	readonly language: string;
 	readonly pluralCount: number;
@@ -331,10 +359,7 @@ async function processProviderBatch(options: {
 	readonly translateBatch: TranslateBatchFunction;
 }): Promise<OpenAITranslateBatchResult> {
 	return options.translateBatch({
-		dictionaryMatches: findDictionaryMatches(
-			options.batch.entries,
-			options.dictionary,
-		),
+		dictionaryMatches: options.dictionaryMatcher(options.batch.entries),
 		dryRun: options.executeOptions.dryRun,
 		entries: options.batch.entries,
 		maxRetries: options.executeOptions.maxRetries,
@@ -416,13 +441,14 @@ async function processLanguage(options: {
 			maxStrings: options.maxStrings,
 		}),
 	});
-	const promptTemplate = (
-		await loadPromptTemplate(options.executeOptions.promptFilePath)
-	).prompt;
+	const promptTemplate = await loadPromptTemplate(
+		options.executeOptions.promptFilePath,
+	);
 	const dictionary = await loadDictionaryIfEnabled(
 		options.executeOptions,
 		options.language,
 	);
+	const dictionaryMatcher = createDictionaryMatcher(dictionary.dictionary);
 	let cost = ZERO_COST;
 	const debug: TranslationBatchDebug[] = [];
 	let failed = 0;
@@ -496,11 +522,11 @@ async function processLanguage(options: {
 		} else {
 			const estimated = await processProviderBatch({
 				batch,
-				dictionary,
+				dictionaryMatcher,
 				executeOptions: { ...options.executeOptions, dryRun: true },
 				language: options.language,
 				pluralCount: outputDocument.pluralCount,
-				promptTemplate,
+				promptTemplate: promptTemplate.prompt,
 				translateBatch: options.translateBatch,
 			});
 			if (!estimated.ok) {
@@ -528,13 +554,17 @@ async function processLanguage(options: {
 					maxCost: options.executeOptions.maxCost,
 				})
 			) {
-				skippedByCost += batch.entries.length;
+				const skippedStrings = countBatchEntriesFrom(
+					batchPlan.batches,
+					batch.number,
+				);
+				skippedByCost += skippedStrings;
 				options.executeOptions.onProgress?.({
 					batch: batch.number,
 					language: options.language,
 					phase: "batch-skipped",
 					reason: "cost-limit",
-					skippedStrings: batch.entries.length,
+					skippedStrings,
 					totalStrings: batchPlan.plannedStrings,
 				});
 				break;
@@ -544,14 +574,22 @@ async function processLanguage(options: {
 				? estimated
 				: await processProviderBatch({
 						batch,
-						dictionary,
+						dictionaryMatcher,
 						executeOptions: options.executeOptions,
 						language: options.language,
 						pluralCount: outputDocument.pluralCount,
-						promptTemplate,
+						promptTemplate: promptTemplate.prompt,
 						translateBatch: options.translateBatch,
 					});
 			if (!result.ok) {
+				if (options.executeOptions.saveDebugInfo === true) {
+					const batchDebug = getBatchDebug({
+						batch: batch.number,
+						result,
+						targetLanguage: options.language,
+					});
+					if (batchDebug !== undefined) debug.push(batchDebug);
+				}
 				failed += batch.entries.length;
 				processedForProgress += batch.entries.length;
 				failureMessage = result.error;
@@ -570,7 +608,6 @@ async function processLanguage(options: {
 				continue;
 			}
 
-			cost = addCosts(cost, result.cost);
 			if (options.executeOptions.saveDebugInfo === true) {
 				const batchDebug = getBatchDebug({
 					batch: batch.number,
@@ -579,29 +616,63 @@ async function processLanguage(options: {
 				});
 				if (batchDebug !== undefined) debug.push(batchDebug);
 			}
-			if (!options.executeOptions.dryRun) {
-				failed += result.missingEntries.length;
-			}
 			const batchValidation =
 				result.validationStats ?? createEmptyValidationStats();
+			const issueCount = getValidationIssueCount(batchValidation);
+			const invalidEntryKeys = getInvalidEntryKeys(batchValidation);
+			const safeTranslations = result.translations.filter(
+				(translation) => !invalidEntryKeys.has(translation.entry.key),
+			);
+			if (
+				!options.executeOptions.dryRun &&
+				shouldSkipBatchForCost({
+					batchCost: result.cost,
+					currentCost: addCosts(options.spentCost ?? ZERO_COST, cost),
+					maxCost: options.executeOptions.maxCost,
+				})
+			) {
+				cost = addCosts(cost, result.cost);
+				const skippedStrings = countBatchEntriesFrom(
+					batchPlan.batches,
+					batch.number,
+				);
+				skippedByCost += skippedStrings;
+				options.executeOptions.onProgress?.({
+					batch: batch.number,
+					language: options.language,
+					phase: "batch-skipped",
+					reason: "cost-limit",
+					skippedStrings,
+					totalStrings: batchPlan.plannedStrings,
+				});
+				break;
+			}
+
+			cost = addCosts(cost, result.cost);
+			if (!options.executeOptions.dryRun) {
+				failed += result.missingEntries.length + invalidEntryKeys.size;
+			}
 			validation = addValidationStats(validation, batchValidation);
 			if (!options.executeOptions.dryRun) {
-				output = applyTranslations({
-					output,
-					translations: result.translations,
-				});
-				await writePoFile({ output, outputFile });
-				emitBatchSaved({
-					batch,
-					executeOptions: options.executeOptions,
-					language: options.language,
-				});
-				translated += result.translations.length;
+				if (safeTranslations.length > 0) {
+					output = applyTranslations({
+						output,
+						translations: safeTranslations,
+					});
+					await writePoFile({ output, outputFile });
+					emitBatchSaved({
+						batch,
+						executeOptions: options.executeOptions,
+						language: options.language,
+					});
+					translated += safeTranslations.length;
+				}
 			}
 			processedForProgress += options.executeOptions.dryRun
 				? batch.entries.length
-				: result.translations.length + result.missingEntries.length;
-			const issueCount = getValidationIssueCount(batchValidation);
+				: safeTranslations.length +
+					result.missingEntries.length +
+					invalidEntryKeys.size;
 			if (issueCount > 0) {
 				options.executeOptions.onProgress?.({
 					issues: issueCount,
@@ -650,11 +721,15 @@ async function processLanguage(options: {
 		...(debug.length > 0 && { debug }),
 		...(failureMessage !== undefined && { error: failureMessage }),
 		...(mergeWarning !== undefined ||
-		outputDocument.headerTemplate.warning !== undefined
+		outputDocument.headerTemplate.warning !== undefined ||
+		promptTemplate.warning !== undefined ||
+		dictionary.warning !== undefined
 			? {
 					warning: [
 						mergeWarning,
 						outputDocument.headerTemplate.warning,
+						promptTemplate.warning,
+						dictionary.warning,
 					]
 						.filter(
 							(warning): warning is string =>
@@ -853,6 +928,7 @@ export async function executeTranslate(
 	options: ExecuteTranslateOptions,
 	translateBatch: TranslateBatchFunction = translateOpenAIBatch,
 ): Promise<TranslationRunResult> {
+	assertUniqueOutputFiles(options);
 	const document = await readPotDocument(options.potFilePath);
 	const results = canProcessLanguagesConcurrently(options)
 		? await processLanguagesConcurrently({

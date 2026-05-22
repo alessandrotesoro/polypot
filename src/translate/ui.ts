@@ -21,6 +21,7 @@ import type {
 	TranslationRunStatus,
 } from "./results.js";
 import {
+	buildTranslateOutputFile,
 	buildTranslateWorkload,
 	type LocaleFormat,
 	type TranslatePreviewWorkload,
@@ -147,6 +148,7 @@ export interface TranslateUiResult {
 		readonly code:
 			| "missing_pot_file_path"
 			| "missing_target_languages"
+			| "duplicate_output_file"
 			| "pot_analysis_failed"
 			| "unsupported_provider";
 		readonly message: string;
@@ -263,16 +265,41 @@ function formatPath(value: string): string {
 	return sanitizeTerminalText(value);
 }
 
+function findDuplicateOutputFile(
+	preview: TranslateUiPreviewOptions,
+): { file: string; languages: readonly string[] } | undefined {
+	const languagesByFile = new Map<string, string[]>();
+
+	for (const language of preview.languages) {
+		const outputFile = buildTranslateOutputFile(
+			{
+				localeFormat: preview.localeFormat,
+				outputDir: preview.outputDir,
+				...(preview.poFilePrefix !== undefined && {
+					poFilePrefix: preview.poFilePrefix,
+				}),
+			},
+			language,
+		);
+		languagesByFile.set(outputFile, [
+			...(languagesByFile.get(outputFile) ?? []),
+			language,
+		]);
+	}
+
+	for (const [file, languages] of languagesByFile) {
+		if (languages.length > 1) return { file, languages };
+	}
+
+	return undefined;
+}
+
 function formatLanguage(value: string): string {
 	return sanitizeTerminalText(value);
 }
 
 function formatSourceDetails(analysis: PotAnalysis): string {
 	return `${formatNumber(analysis.pluralStrings)} plural | ${formatNumber(analysis.contextStrings)} context | ${formatNumber(analysis.fuzzyStrings)} fuzzy`;
-}
-
-function formatWorkload(workload: TranslatePreviewWorkload): string {
-	return `${formatNumber(workload.plannedStrings)} / ${formatNumber(workload.sourceStrings)} planned strings across ${formatCount(workload.batches, "batch", "batches")}`;
 }
 
 function formatProgressLine(options: {
@@ -325,43 +352,56 @@ function buildPreflight(
 		"",
 		color.bold("Plan"),
 		row("Targets", preview.languages.map(formatLanguage).join(", ")),
-		row("Workload", formatWorkload(workload)),
+		row("Workload", "calculated after existing PO merge"),
 		row(
 			"Runtime",
 			`${formatCount(getConcurrentJobs(preview), "job")}, batch size ${preview.batchSize}`,
-		),
-		row(
-			"Estimate",
-			`~${formatNumber(workload.estimate.totalTokens)} tokens, ~${formatCurrency(workload.estimate.cost)}`,
 		),
 		row("Limits", formatLimits(preview)),
 		"",
 	].join("\n");
 }
 
-function buildSummaryFromWorkload(workload: TranslatePreviewWorkload): string {
-	const languageLines = workload.languages.map((language) =>
+function buildSummaryFromResult(result: TranslateUiResult): string {
+	const totals = result.totals;
+	if (totals === undefined) return result.summary;
+
+	const languageLines = result.results.map((language) =>
 		row(
 			formatLanguage(language.language),
 			formatPath(language.outputFile),
 			9,
 		),
 	);
+	const cost =
+		result.cost?.totalCost ??
+		result.results.reduce(
+			(total, language) => total + language.estimate.cost,
+			0,
+		);
 
 	return [
 		"Preview complete",
 		"",
 		"Planned",
-		row("Languages", formatNumber(workload.languages.length)),
+		row("Languages", formatNumber(result.results.length)),
 		row(
 			"Strings",
-			`${formatNumber(workload.plannedStrings)} / ${formatNumber(workload.sourceStrings)}`,
+			`${formatNumber(totals.plannedStrings)} / ${formatNumber(totals.sourceStrings)}`,
 		),
-		row("Batches", formatNumber(workload.batches)),
-		row("Cost", `~${formatCurrency(workload.estimate.cost)}`),
+		row(
+			"Batches",
+			formatNumber(
+				result.results.reduce(
+					(total, language) => total + language.batches,
+					0,
+				),
+			),
+		),
+		row("Cost", `~${formatCurrency(cost)}`),
 		row(
 			"Skipped",
-			`${formatNumber(workload.skippedByLimit)} by limits, ${formatNumber(workload.skippedByCost)} by cost`,
+			`${formatNumber(totals.skippedByLimit)} by limits, ${formatNumber(totals.skippedByCost)} by cost`,
 		),
 		"",
 		"Outputs",
@@ -374,14 +414,13 @@ function buildSummaryFromWorkload(workload: TranslatePreviewWorkload): string {
 
 function appendDryRunSummary(
 	preview: TranslateUiPreviewOptions,
-	workload: TranslatePreviewWorkload,
 	result: TranslateUiResult,
 ): TranslateUiResult {
 	if (!preview.dryRun || result.status !== "dry-run") return result;
 
 	return {
 		...result,
-		summary: `${buildSummaryFromWorkload(workload)}\n\n${result.summary}`,
+		summary: `${buildSummaryFromResult(result)}\n\n${result.summary}`,
 	};
 }
 
@@ -760,6 +799,22 @@ export async function runTranslateUiPreview(
 		};
 	}
 
+	const duplicateOutputFile = findDuplicateOutputFile(preview);
+	if (duplicateOutputFile !== undefined) {
+		const message = `Multiple target languages resolve to the same output file ${sanitizeTerminalText(duplicateOutputFile.file)}: ${duplicateOutputFile.languages.map(formatLanguage).join(", ")}. Use a locale format that keeps them distinct.`;
+
+		return {
+			...baseResult,
+			error: {
+				code: "duplicate_output_file",
+				message,
+			},
+			results: [],
+			status: "blocked",
+			summary: message,
+		};
+	}
+
 	if (config.provider !== "openai") {
 		const message = `Provider ${sanitizeTerminalText(config.provider)} is not supported by translate yet. Use --provider openai.`;
 
@@ -799,7 +854,6 @@ export async function runTranslateUiPreview(
 	if (renderer === "silent") {
 		return appendDryRunSummary(
 			preview,
-			workload,
 			await runTranslateExecution(plan, renderer),
 		);
 	}
@@ -807,7 +861,6 @@ export async function runTranslateUiPreview(
 	process.stdout.write(buildPreflight(preview, workload));
 	return appendDryRunSummary(
 		preview,
-		workload,
 		await runTranslateExecution(plan, renderer),
 	);
 }

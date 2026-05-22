@@ -190,6 +190,10 @@ describe("polypot translate", () => {
 				message: "--jobs must be an integer between 1 and 10",
 			},
 			{
+				args: ["--timeout", "9"],
+				message: "--timeout must be an integer between 10 and 300",
+			},
+			{
 				args: ["--max-strings-per-job", "0"],
 				message:
 					"--max-strings-per-job must be an integer greater than or equal to 1",
@@ -202,6 +206,15 @@ describe("polypot translate", () => {
 			{
 				args: ["--max-cost", "12abc"],
 				message: "--max-cost must be a non-negative number",
+			},
+			{
+				args: ["--max-retries", "11"],
+				message: "--max-retries must be an integer between 0 and 10",
+			},
+			{
+				args: ["--retry-delay", "499"],
+				message:
+					"--retry-delay must be an integer between 500 and 30000",
 			},
 		];
 
@@ -311,10 +324,9 @@ describe("polypot translate", () => {
 		expect(stdout).to.include("Plan");
 		expect(stdout).to.include("Targets");
 		expect(stdout).to.include("Runtime");
-		expect(stdout).to.include("Estimate");
+		expect(stdout).to.include("calculated after existing PO merge");
 		expect(stdout).to.include("fr_FR");
 		expect(stdout).to.include("Batch");
-		expect(stdout).to.include("tokens");
 		expect(stdout).to.include("output");
 		expect(stdout).to.include("Preview complete");
 		expect(stdout).to.include("Planned");
@@ -813,6 +825,30 @@ describe("polypot translate", () => {
 		expect(result.results[0]?.outputFile).to.equal(
 			path.join("languages", "fra.po"),
 		);
+	});
+
+	it("blocks target languages that resolve to the same output file", async () => {
+		const potFile = await writePotFixture();
+		const { stdout, error } = await runCommand([
+			"translate",
+			"--json",
+			"-l",
+			"pt_BR,pt_PT",
+			"-p",
+			potFile,
+			"--locale-format",
+			"iso_639_1",
+			"--dry-run",
+		]);
+		const result = JSON.parse(stdout) as {
+			readonly error: { readonly code: string };
+			readonly status: string;
+		};
+
+		expect(error).to.equal(undefined);
+		expect(result.status).to.equal("blocked");
+		expect(result.error.code).to.equal("duplicate_output_file");
+		expect(process.exitCode).to.equal(1);
 	});
 
 	it("applies the global string limit to the preview plan", async () => {

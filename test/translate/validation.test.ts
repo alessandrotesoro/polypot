@@ -46,6 +46,28 @@ describe("translation validation", () => {
 		expect(result.issues).to.deep.equal([]);
 	});
 
+	it("rejects reordered unnumbered placeholders", () => {
+		const result = validateEntryTranslation({
+			entry: entry("%s has %d files"),
+			msgstr: ["%d fichiers pour %s"],
+			pluralCount: 2,
+		});
+
+		expect(result.msgstr).to.deep.equal([""]);
+		expect(result.issues[0]?.reason).to.equal("placeholder_mismatch");
+	});
+
+	it("allows reordered positional placeholders", () => {
+		const result = validateEntryTranslation({
+			entry: entry("%1$s has %2$d files"),
+			msgstr: ["%2$d fichiers pour %1$s"],
+			pluralCount: 2,
+		});
+
+		expect(result.msgstr).to.deep.equal(["%2$d fichiers pour %1$s"]);
+		expect(result.issues).to.deep.equal([]);
+	});
+
 	it("blanks translations with missing placeholders", () => {
 		const result = validateEntryTranslation({
 			entry: entry("Hello %s"),

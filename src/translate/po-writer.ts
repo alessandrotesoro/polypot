@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import {
@@ -168,16 +169,15 @@ export function applyTranslations(options: {
 	readonly output: GetTextTranslations;
 	readonly translations: readonly ParsedTranslation[];
 }): GetTextTranslations {
-	const output = cloneTranslations(options.output);
-
 	for (const item of options.translations) {
-		const target = getTranslation(output, item.entry);
+		const target = getTranslation(options.output, item.entry);
 		if (target !== undefined) {
 			target.msgstr = [...item.msgstr];
+			removeFuzzyFlag(target);
 		}
 	}
 
-	return output;
+	return options.output;
 }
 
 export function getEntriesWithTranslations(
@@ -194,6 +194,22 @@ export async function writePoFile(options: {
 	readonly output: GetTextTranslations;
 	readonly outputFile: string;
 }): Promise<void> {
-	await fs.mkdir(path.dirname(options.outputFile), { recursive: true });
-	await fs.writeFile(options.outputFile, po.compile(options.output));
+	const outputDirectory = path.dirname(options.outputFile);
+	const temporaryFile = path.join(
+		outputDirectory,
+		`.${path.basename(options.outputFile)}.${process.pid}.${crypto.randomUUID()}.tmp`,
+	);
+	await fs.mkdir(outputDirectory, { recursive: true });
+	const handle = await fs.open(temporaryFile, "w");
+
+	try {
+		await handle.writeFile(po.compile(options.output));
+		await handle.sync();
+		await handle.close();
+		await fs.rename(temporaryFile, options.outputFile);
+	} catch (error) {
+		await handle.close().catch(() => undefined);
+		await fs.rm(temporaryFile, { force: true });
+		throw error;
+	}
 }

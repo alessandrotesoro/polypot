@@ -52,7 +52,7 @@ const BehaviorConfig = z.object({
 const PerformanceConfig = z.object({
 	batchSize: z.number().int().min(1).max(100).default(20),
 	jobs: z.number().int().min(1).max(10).default(2),
-	timeout: z.number().int().default(60),
+	timeout: z.number().int().min(10).max(300).default(60),
 });
 
 const LimitsConfig = z.object({
@@ -62,8 +62,8 @@ const LimitsConfig = z.object({
 });
 
 const RetriesConfig = z.object({
-	maxRetries: z.number().int().default(3),
-	retryDelay: z.number().int().default(2000),
+	maxRetries: z.number().int().min(0).max(10).default(3),
+	retryDelay: z.number().int().min(500).max(30000).default(2000),
 	abortOnFailure: z.boolean().default(false),
 	skipLanguageOnFailure: z.boolean().default(false),
 });

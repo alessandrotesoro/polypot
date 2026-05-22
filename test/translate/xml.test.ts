@@ -80,4 +80,18 @@ describe("parseXmlResponse", () => {
 		expect(result.translations).to.have.length(1);
 		expect(result.missingEntries).to.deep.equal([]);
 	});
+
+	it("reports missing plural form tags", () => {
+		const result = parseXmlResponse({
+			entries: [entry("%d file", { msgidPlural: "%d files" })],
+			pluralCount: 2,
+			xml: '<t i="1"><f0>%d fichier</f0></t>',
+		});
+
+		expect(result.validationStats.pluralFormIssues).to.equal(1);
+		expect(result.translations[0]?.msgstr).to.deep.equal([
+			"%d fichier",
+			"",
+		]);
+	});
 });

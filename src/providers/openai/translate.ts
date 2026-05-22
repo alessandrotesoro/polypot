@@ -63,6 +63,10 @@ export type OpenAITranslateBatchResult =
 			readonly validationStats: TranslationValidationStats;
 	  }
 	| {
+			readonly debug?: {
+				readonly messages: readonly ChatCompletionMessageParam[];
+				readonly response?: string;
+			};
 			readonly error: string;
 			readonly ok: false;
 			readonly retryable: boolean;
@@ -169,6 +173,33 @@ function getErrorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
 }
 
+function redactSecret(value: string, secret: string | undefined): string {
+	if (secret === undefined || secret.length === 0) return value;
+
+	return value.replaceAll(secret, "[redacted]");
+}
+
+function getSafeErrorMessage(
+	error: unknown,
+	apiKey: string | undefined,
+): string {
+	return redactSecret(getErrorMessage(error), apiKey);
+}
+
+function getValidationIssueCount(stats: TranslationValidationStats): number {
+	return stats.blankedStrings.length;
+}
+
+class SemanticTranslationError extends Error {
+	public constructor(
+		message: string,
+		public readonly response: string,
+	) {
+		super(message);
+		this.name = "SemanticTranslationError";
+	}
+}
+
 function isAuthenticationError(error: unknown): boolean {
 	return (
 		error instanceof APIError &&
@@ -233,6 +264,7 @@ export async function translateOpenAIBatch(
 
 	if (options.apiKey === undefined || options.apiKey.trim().length === 0) {
 		return {
+			debug: { messages },
 			error: "OpenAI API key is required for translation.",
 			ok: false,
 			retryable: false,
@@ -244,6 +276,7 @@ export async function translateOpenAIBatch(
 		timeoutMs: options.timeoutSeconds * 1000,
 	});
 	let lastError: unknown;
+	let lastResponse: string | undefined;
 
 	for (let attempt = 0; attempt <= options.maxRetries; attempt += 1) {
 		if (attempt > 0) await delay(options.retryDelayMs);
@@ -253,12 +286,25 @@ export async function translateOpenAIBatch(
 				buildRequestBody(options, messages),
 			);
 			const content = response.choices[0]?.message.content ?? "";
+			lastResponse = content;
 			const parsed = parseXmlResponse({
 				dictionaryCount: options.dictionaryMatches?.length ?? 0,
 				entries: options.entries,
 				pluralCount: options.pluralCount,
 				xml: content,
 			});
+			const semanticIssueCount =
+				parsed.missingEntries.length +
+				getValidationIssueCount(parsed.validationStats) +
+				parsed.translations.filter((translation) =>
+					translation.msgstr.every((value) => value.length === 0),
+				).length;
+			if (semanticIssueCount > 0) {
+				throw new SemanticTranslationError(
+					`Model response did not satisfy the translation contract (${semanticIssueCount} issue${semanticIssueCount === 1 ? "" : "s"}).`,
+					content,
+				);
+			}
 
 			return {
 				cost: calculateUsageCost(
@@ -275,12 +321,19 @@ export async function translateOpenAIBatch(
 			};
 		} catch (error) {
 			lastError = error;
+			if (error instanceof SemanticTranslationError) {
+				lastResponse = error.response;
+			}
 			if (!isRetryableError(error)) break;
 		}
 	}
 
 	return {
-		error: `OpenAI translation failed: ${getErrorMessage(lastError)}`,
+		debug: {
+			messages,
+			...(lastResponse !== undefined && { response: lastResponse }),
+		},
+		error: `OpenAI translation failed: ${getSafeErrorMessage(lastError, options.apiKey)}`,
 		ok: false,
 		retryable: isRetryableError(lastError),
 	};

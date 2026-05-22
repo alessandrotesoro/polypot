@@ -37,7 +37,27 @@ export function extractPlaceholders(value: string): readonly string[] {
 		value
 			.replaceAll("%%", "\u0000\u0000")
 			.match(PRINTF_PLACEHOLDER_PATTERN) ?? []
-	).sort();
+	);
+}
+
+function hasExplicitPosition(placeholder: string): boolean {
+	return /^%\d+\$/.test(placeholder);
+}
+
+function placeholdersMatch(
+	expected: readonly string[],
+	got: readonly string[],
+): boolean {
+	if (arraysEqual(expected, got)) return true;
+	if (
+		expected.length > 0 &&
+		expected.every(hasExplicitPosition) &&
+		got.every(hasExplicitPosition)
+	) {
+		return arraysEqual([...expected].sort(), [...got].sort());
+	}
+
+	return false;
 }
 
 function countValues(values: readonly string[]): Map<string, number> {
@@ -148,7 +168,7 @@ export function validateEntryTranslation(options: {
 		);
 		const got = extractPlaceholders(translation);
 		const valid =
-			arraysEqual(expected, got) ||
+			placeholdersMatch(expected, got) ||
 			(options.entry.plural &&
 				canDropNumericPlaceholders({
 					expected,
@@ -179,9 +199,7 @@ export function summarizeValidationIssues(
 	issues: readonly TranslationValidationIssue[],
 ): TranslationValidationStats {
 	return {
-		blankedStrings: issues.filter(
-			(issue) => issue.reason === "placeholder_mismatch",
-		),
+		blankedStrings: issues,
 		placeholderMismatches: issues.filter(
 			(issue) => issue.reason === "placeholder_mismatch",
 		).length,

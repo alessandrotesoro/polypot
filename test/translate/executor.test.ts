@@ -265,10 +265,125 @@ describe("executeTranslate", () => {
 			expect(result.status).to.equal("failed");
 			expect(calls).to.equal(1);
 			expect(result.results[0]).to.deep.include({
-				skippedByCost: 2,
+				skippedByCost: 3,
 				translated: 0,
 			});
-			expect(result.totals.skippedByCost).to.equal(2);
+			expect(result.totals.skippedByCost).to.equal(3);
+		} finally {
+			await project.cleanup();
+		}
+	});
+
+	it("does not write a batch when actual cost exceeds the cost limit", async () => {
+		const project = await makeProject();
+		let calls = 0;
+
+		try {
+			const result = await executeTranslate(
+				buildOptions(project, {
+					batchSize: 2,
+					maxCost: 0.00001,
+				}),
+				async (options) => {
+					calls += 1;
+					return {
+						cost: options.dryRun
+							? calculateOpenAICost({
+									completionTokens: 0,
+									model: "gpt-5.4-mini",
+									promptTokens: 0,
+								})
+							: calculateOpenAICost({
+									completionTokens: 1_000_000,
+									model: "gpt-5.4-mini",
+									promptTokens: 1_000_000,
+								}),
+						debug: { messages: [] },
+						dryRun: options.dryRun,
+						missingEntries: [],
+						ok: true,
+						translations: options.entries.map((entry) => ({
+							entry,
+							msgstr: [`${entry.msgid} FR`],
+						})),
+						validationStats: {
+							blankedStrings: [],
+							placeholderMismatches: 0,
+							pluralFormIssues: 0,
+						},
+					};
+				},
+			);
+
+			expect(result.status).to.equal("failed");
+			expect(calls).to.equal(2);
+			expect(result.results[0]).to.deep.include({
+				skippedByCost: 3,
+				translated: 0,
+			});
+			let outputExists = true;
+			try {
+				await fs.readFile(
+					path.join(project.directory, "languages/fr_FR.po"),
+				);
+			} catch {
+				outputExists = false;
+			}
+			expect(outputExists).to.equal(false);
+		} finally {
+			await project.cleanup();
+		}
+	});
+
+	it("counts validation-rejected translations as failed", async () => {
+		const project = await makeProject();
+
+		try {
+			const result = await executeTranslate(
+				buildOptions(project, { batchSize: 2 }),
+				async (options) => ({
+					cost: successCost(),
+					debug: { messages: [] },
+					dryRun: false,
+					missingEntries: [],
+					ok: true,
+					translations: options.entries.map((entry) => ({
+						entry,
+						msgstr: [`${entry.msgid} FR`],
+					})),
+					validationStats: {
+						blankedStrings: [
+							{
+								entryKey: options.entries[0]?.key ?? "",
+								expected: ["%s"],
+								form: 0,
+								got: [],
+								reason: "placeholder_mismatch",
+							},
+						],
+						placeholderMismatches: 1,
+						pluralFormIssues: 0,
+					},
+				}),
+			);
+			const output = po.parse(
+				await fs.readFile(
+					path.join(project.directory, "languages/fr_FR.po"),
+				),
+				{ validation: false },
+			);
+
+			expect(result.status).to.equal("failed");
+			expect(result.results[0]).to.deep.include({
+				failed: 2,
+				translated: 1,
+			});
+			expect(output.translations[""]?.["Hello"]?.msgstr).to.deep.equal([
+				"",
+			]);
+			expect(output.translations[""]?.["Save"]?.msgstr).to.deep.equal([
+				"Save FR",
+			]);
 		} finally {
 			await project.cleanup();
 		}
@@ -300,6 +415,37 @@ describe("executeTranslate", () => {
 				"es_ES",
 			]);
 			expect(maxActive).to.be.greaterThan(1);
+		} finally {
+			await project.cleanup();
+		}
+	});
+
+	it("surfaces prompt and dictionary loader warnings", async () => {
+		const project = await makeProject();
+		const dictionaryDir = path.join(project.directory, "dictionaries");
+		await fs.mkdir(dictionaryDir);
+		await fs.writeFile(
+			path.join(dictionaryDir, "dictionary-fr-fr.json"),
+			"[]",
+		);
+
+		try {
+			const result = await executeTranslate(
+				buildOptions(project, {
+					dictionaryPath: dictionaryDir,
+					promptFilePath: path.join(project.directory, "missing.md"),
+					useDictionary: true,
+				}),
+				fakeTranslateBatch,
+			);
+
+			expect(result.status).to.equal("completed");
+			expect(result.results[0]?.warning).to.include(
+				"Could not read prompt template",
+			);
+			expect(result.results[0]?.warning).to.include(
+				"Dictionary must be a JSON object",
+			);
 		} finally {
 			await project.cleanup();
 		}

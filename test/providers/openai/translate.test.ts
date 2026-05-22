@@ -119,7 +119,7 @@ describe("translateOpenAIBatch", () => {
 			clientFactory({ calls: [] }),
 		);
 
-		expect(result).to.deep.equal({
+		expect(result).to.deep.include({
 			error: "OpenAI API key is required for translation.",
 			ok: false,
 			retryable: false,
@@ -164,5 +164,40 @@ describe("translateOpenAIBatch", () => {
 
 		expect(result.ok).to.equal(false);
 		expect(calls).to.have.length(1);
+	});
+
+	it("retries malformed model responses before failing with debug context", async () => {
+		const calls: unknown[] = [];
+		const result = await translateOpenAIBatch(
+			buildOptions({ maxRetries: 1 }),
+			clientFactory({
+				calls,
+				response: {
+					choices: [{ message: { content: '<t i="1"></t>' } }],
+				},
+			}),
+		);
+
+		expect(result.ok).to.equal(false);
+		expect(calls).to.have.length(2);
+		if (result.ok) throw new Error("expected failure");
+		expect(result.error).to.include("translation contract");
+		expect(result.debug?.response).to.equal('<t i="1"></t>');
+	});
+
+	it("redacts API keys from provider error messages", async () => {
+		const calls: unknown[] = [];
+		const result = await translateOpenAIBatch(
+			buildOptions({ apiKey: "sk-secret" }),
+			clientFactory({
+				calls,
+				fail: () => new Error("request failed for sk-secret"),
+			}),
+		);
+
+		expect(result.ok).to.equal(false);
+		if (result.ok) throw new Error("expected failure");
+		expect(result.error).to.not.include("sk-secret");
+		expect(result.error).to.include("[redacted]");
 	});
 });

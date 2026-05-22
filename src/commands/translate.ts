@@ -305,6 +305,21 @@ each target language.
 			"--jobs",
 			{ max: 10, min: 1 },
 		);
+		const timeout = this.resolveBoundedInteger(
+			this.flags.timeout ?? this.appConfig.performance.timeout,
+			"--timeout",
+			{ max: 300, min: 10 },
+		);
+		const maxRetries = this.resolveBoundedInteger(
+			this.flags["max-retries"] ?? this.appConfig.retries.maxRetries,
+			"--max-retries",
+			{ max: 10, min: 0 },
+		);
+		const retryDelay = this.resolveBoundedInteger(
+			this.flags["retry-delay"] ?? this.appConfig.retries.retryDelay,
+			"--retry-delay",
+			{ max: 30000, min: 500 },
+		);
 		const maxCost = this.resolveMaxCost();
 		const maxStringsPerJob = this.resolveOptionalBoundedInteger(
 			this.flags["max-strings-per-job"] ??
@@ -329,10 +344,13 @@ each target language.
 			batchSize,
 			jobs,
 			languages,
+			maxRetries,
 			outputFormat,
 			...(maxCost !== undefined && { maxCost }),
 			...(maxStringsPerJob !== undefined && { maxStringsPerJob }),
 			...(maxTotalStrings !== undefined && { maxTotalStrings }),
+			retryDelay,
+			timeout,
 			localeFormat,
 			outputDir,
 			...(outputFile !== undefined && { outputFile }),
@@ -420,6 +438,7 @@ each target language.
 		readonly batchSize: number;
 		readonly jobs: number;
 		readonly languages: readonly string[];
+		readonly maxRetries: number;
 		readonly maxCost?: number;
 		readonly maxStringsPerJob?: number;
 		readonly maxTotalStrings?: number;
@@ -429,6 +448,8 @@ each target language.
 		readonly outputFormat: string;
 		readonly poFilePrefix?: string;
 		readonly potFilePath?: string;
+		readonly retryDelay: number;
+		readonly timeout: number;
 	}): TranslateSettingsSnapshot {
 		const inputPoPath =
 			this.flags["input-po-path"] ?? this.appConfig.source.inputPoPath;
@@ -486,8 +507,7 @@ each target language.
 			performance: {
 				batchSize: resolved.batchSize,
 				jobs: resolved.jobs,
-				timeout:
-					this.flags.timeout ?? this.appConfig.performance.timeout,
+				timeout: resolved.timeout,
 			},
 			provider: {
 				...(maxTokens !== undefined && { maxTokens }),
@@ -502,12 +522,8 @@ each target language.
 				abortOnFailure:
 					this.flags["abort-on-failure"] ??
 					this.appConfig.retries.abortOnFailure,
-				maxRetries:
-					this.flags["max-retries"] ??
-					this.appConfig.retries.maxRetries,
-				retryDelay:
-					this.flags["retry-delay"] ??
-					this.appConfig.retries.retryDelay,
+				maxRetries: resolved.maxRetries,
+				retryDelay: resolved.retryDelay,
 				skipLanguageOnFailure:
 					this.flags["skip-language-on-failure"] ??
 					this.appConfig.retries.skipLanguageOnFailure,

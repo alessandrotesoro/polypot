@@ -15,6 +15,10 @@ export interface DictionaryLoadResult {
 	readonly warning?: string;
 }
 
+export type DictionaryMatcher = (
+	entries: readonly PotEntry[],
+) => readonly DictionaryMatch[];
+
 function getCandidatePaths(
 	dictionaryPath: string,
 	targetLanguage: string,
@@ -108,20 +112,33 @@ export function findDictionaryMatches(
 	entries: readonly PotEntry[],
 	dictionary: TranslationDictionary,
 ): readonly DictionaryMatch[] {
-	if (entries.length === 0) return [];
+	return createDictionaryMatcher(dictionary)(entries);
+}
 
-	const text = entries
-		.map((entry) => [entry.msgid, entry.msgidPlural ?? ""].join(" "))
-		.join(" ")
-		.toLowerCase();
-	const matches: DictionaryMatch[] = [];
+export function createDictionaryMatcher(
+	dictionary: TranslationDictionary,
+): DictionaryMatcher {
+	const patterns = Object.entries(dictionary).map(([source, target]) => ({
+		pattern: new RegExp(`\\b${escapeRegExp(source)}\\b`),
+		source,
+		target,
+	}));
 
-	for (const [source, target] of Object.entries(dictionary)) {
-		const pattern = new RegExp(`\\b${escapeRegExp(source)}\\b`);
-		if (pattern.test(text)) {
-			matches.push({ source, target });
+	return (entries) => {
+		if (entries.length === 0) return [];
+
+		const text = entries
+			.map((entry) => [entry.msgid, entry.msgidPlural ?? ""].join(" "))
+			.join(" ")
+			.toLowerCase();
+		const matches: DictionaryMatch[] = [];
+
+		for (const { pattern, source, target } of patterns) {
+			if (pattern.test(text)) {
+				matches.push({ source, target });
+			}
 		}
-	}
 
-	return matches;
+		return matches;
+	};
 }

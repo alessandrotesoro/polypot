@@ -53,7 +53,8 @@ function getFormTranslations(block: string, pluralCount: number): string[] {
 		const match = new RegExp(`<f${index}>([\\s\\S]*?)</f${index}>`).exec(
 			block,
 		);
-		forms.push(match?.[1] === undefined ? "" : decodeXml(match[1]));
+		if (match?.[1] === undefined) break;
+		forms.push(decodeXml(match[1]));
 	}
 
 	return forms;

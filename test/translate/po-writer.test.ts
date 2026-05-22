@@ -161,6 +161,9 @@ describe("PO writer", () => {
 			expect(parsed.translations[""]?.["Hello"]?.msgstr).to.deep.equal([
 				"Bonjour",
 			]);
+			expect(parsed.translations[""]?.["Hello"]?.comments?.flag).to.equal(
+				undefined,
+			);
 			expect(parsed.headers["Language"]).to.equal("fr-FR");
 		} finally {
 			await project.cleanup();
