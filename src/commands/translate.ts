@@ -14,11 +14,22 @@ import {
 	type TranslateSettingsSnapshot,
 } from "../translate/ui.js";
 
+const UNSAFE_FILE_PREFIX_PATTERN = /[<>:"/\\|?*]|\.\./;
+const PO_FILE_PREFIX_ERROR =
+	"--po-file-prefix cannot contain path separators, drive prefixes, dot segments, control characters, or Windows-reserved filename characters.";
+
 function getExplicitConfigProjectDirectory(configPath: string): string {
 	const configDirectory = path.resolve(path.dirname(configPath));
 	return path.basename(configDirectory) === ".polypot"
 		? path.dirname(configDirectory)
 		: configDirectory;
+}
+
+function hasControlCharacter(value: string): boolean {
+	return Array.from(value).some((character) => {
+		const code = character.charCodeAt(0);
+		return code < 32 || code === 127;
+	});
 }
 
 export default class Translate extends BaseCommand<typeof Translate> {
@@ -262,8 +273,16 @@ each target language.
 	public async run(): Promise<unknown> {
 		const outputFormat =
 			this.flags["output-format"] ?? this.appConfig.output.outputFormat;
-		const outputFile =
-			this.flags["output-file"] ?? this.appConfig.output.outputFile;
+		const outputFile = this.resolveConfigSourcedPath(
+			this.flags["output-file"] ?? this.appConfig.output.outputFile,
+			this.flags["output-file"] !== undefined,
+		);
+		const outputDir = this.resolveRequiredConfigSourcedPath(
+			this.flags["output-dir"] ?? this.appConfig.output.outputDir,
+			this.flags["output-dir"] !== undefined,
+		);
+		const localeFormat =
+			this.flags["locale-format"] ?? this.appConfig.output.localeFormat;
 		const usesJsonStdout =
 			this.jsonEnabled() ||
 			(outputFormat === "json" && outputFile === undefined);
@@ -292,6 +311,7 @@ each target language.
 		);
 		const poFilePrefix =
 			this.flags["po-file-prefix"] ?? this.appConfig.output.poFilePrefix;
+		this.validatePoFilePrefix(poFilePrefix);
 		const potFilePath = this.resolvePotFilePath();
 		const verboseLevel =
 			this.flags["verbose-level"] ?? this.appConfig.debug.verboseLevel;
@@ -304,6 +324,8 @@ each target language.
 			...(maxCost !== undefined && { maxCost }),
 			...(maxStringsPerJob !== undefined && { maxStringsPerJob }),
 			...(maxTotalStrings !== undefined && { maxTotalStrings }),
+			localeFormat,
+			outputDir,
 			...(outputFile !== undefined && { outputFile }),
 			...(poFilePrefix !== undefined && { poFilePrefix }),
 			...(potFilePath !== undefined && { potFilePath }),
@@ -324,11 +346,11 @@ each target language.
 				dryRun: this.flags["dry-run"] ?? this.appConfig.debug.dryRun,
 				jobs,
 				languages,
+				localeFormat,
 				...(maxCost !== undefined && { maxCost }),
 				...(maxStringsPerJob !== undefined && { maxStringsPerJob }),
 				...(maxTotalStrings !== undefined && { maxTotalStrings }),
-				outputDir:
-					this.flags["output-dir"] ?? this.appConfig.output.outputDir,
+				outputDir,
 				outputFormat: usesJsonStdout ? "json" : outputFormat,
 				...(poFilePrefix !== undefined && { poFilePrefix }),
 				sourceLanguage:
@@ -384,6 +406,8 @@ each target language.
 		readonly maxCost?: number;
 		readonly maxStringsPerJob?: number;
 		readonly maxTotalStrings?: number;
+		readonly localeFormat: TranslateSettingsSnapshot["output"]["localeFormat"];
+		readonly outputDir: string;
 		readonly outputFile?: string;
 		readonly outputFormat: string;
 		readonly poFilePrefix?: string;
@@ -432,11 +456,8 @@ each target language.
 				}),
 			},
 			output: {
-				localeFormat:
-					this.flags["locale-format"] ??
-					this.appConfig.output.localeFormat,
-				outputDir:
-					this.flags["output-dir"] ?? this.appConfig.output.outputDir,
+				localeFormat: resolved.localeFormat,
+				outputDir: resolved.outputDir,
 				...(resolved.outputFile !== undefined && {
 					outputFile: resolved.outputFile,
 				}),
@@ -569,6 +590,42 @@ each target language.
 			getExplicitConfigProjectDirectory(this.flags.config),
 			configuredPath,
 		);
+	}
+
+	private resolveConfigSourcedPath(
+		value: string | undefined,
+		flagProvided: boolean,
+	): string | undefined {
+		if (value === undefined) return undefined;
+		if (
+			flagProvided ||
+			this.flags.config === undefined ||
+			path.isAbsolute(value)
+		) {
+			return value;
+		}
+
+		return path.join(
+			getExplicitConfigProjectDirectory(this.flags.config),
+			value,
+		);
+	}
+
+	private resolveRequiredConfigSourcedPath(
+		value: string,
+		flagProvided: boolean,
+	): string {
+		return this.resolveConfigSourcedPath(value, flagProvided) ?? value;
+	}
+
+	private validatePoFilePrefix(value: string | undefined): void {
+		if (value === undefined) return;
+		if (
+			hasControlCharacter(value) ||
+			UNSAFE_FILE_PREFIX_PATTERN.test(value)
+		) {
+			this.error(PO_FILE_PREFIX_ERROR, { exit: 1 });
+		}
 	}
 
 	private resolveBoundedInteger(

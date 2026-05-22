@@ -25,6 +25,7 @@ describe("buildTranslateWorkload", () => {
 			{
 				batchSize: 2,
 				languages: ["fr_FR", "es_ES"],
+				localeFormat: "target_lang",
 				maxStringsPerJob: 2,
 				outputDir: "languages",
 			},
@@ -50,6 +51,7 @@ describe("buildTranslateWorkload", () => {
 			{
 				batchSize: 20,
 				languages: ["fr_FR", "es_ES"],
+				localeFormat: "target_lang",
 				maxTotalStrings: 5,
 				outputDir: "languages",
 			},
@@ -69,6 +71,7 @@ describe("buildTranslateWorkload", () => {
 			{
 				batchSize: 20,
 				languages: ["fr_FR", "es_ES"],
+				localeFormat: "target_lang",
 				maxCost: 0.0012,
 				outputDir: "languages",
 			},
@@ -81,5 +84,33 @@ describe("buildTranslateWorkload", () => {
 		expect(
 			workload.languages.map((language) => language.skippedByCost),
 		).to.deep.equal([3, 4]);
+	});
+
+	it("formats output filenames with the requested locale format", () => {
+		const analysis = buildAnalysis([10]);
+		const baseOptions = {
+			batchSize: 20,
+			languages: ["fr_FR"],
+			outputDir: "languages",
+		};
+
+		expect(
+			buildTranslateWorkload(
+				{ ...baseOptions, localeFormat: "target_lang" },
+				analysis,
+			).languages[0]?.outputFile,
+		).to.equal("languages/fr_FR.po");
+		expect(
+			buildTranslateWorkload(
+				{ ...baseOptions, localeFormat: "iso_639_1" },
+				analysis,
+			).languages[0]?.outputFile,
+		).to.equal("languages/fr.po");
+		expect(
+			buildTranslateWorkload(
+				{ ...baseOptions, localeFormat: "iso_639_2" },
+				analysis,
+			).languages[0]?.outputFile,
+		).to.equal("languages/fra.po");
 	});
 });

@@ -271,6 +271,24 @@ describe("polypot translate", () => {
 		);
 	});
 
+	it("rejects path-like PO file prefixes", async () => {
+		const { error } = await runCommand([
+			"translate",
+			"-l",
+			"fr_FR",
+			"-p",
+			"foo.pot",
+			"--po-file-prefix",
+			"../backup/",
+			"--dry-run",
+		]);
+
+		expect(error).to.not.equal(undefined);
+		expect(error?.message).to.include(
+			"--po-file-prefix cannot contain path separators",
+		);
+	});
+
 	it("renders a UI-only translation preview with per-language progress", async () => {
 		const potFile = await writePotFixture();
 		const { stdout, error } = await runCommand([
@@ -620,6 +638,33 @@ describe("polypot translate", () => {
 		).to.deep.equal(["fr_FR", "es_ES", "de_DE"]);
 	});
 
+	it("uses locale format for planned output filenames", async () => {
+		const potFile = await writePotFixture();
+		const { stdout, error } = await runCommand([
+			"translate",
+			"--json",
+			"-l",
+			"fr_FR",
+			"-p",
+			potFile,
+			"--output-dir",
+			"languages",
+			"--locale-format",
+			"iso_639_2",
+			"--dry-run",
+		]);
+		const result = JSON.parse(stdout) as {
+			readonly results: readonly {
+				readonly outputFile: string;
+			}[];
+		};
+
+		expect(error).to.equal(undefined);
+		expect(result.results[0]?.outputFile).to.equal(
+			path.join("languages", "fra.po"),
+		);
+	});
+
 	it("applies the global string limit to the preview plan", async () => {
 		const potFile = await writePotFixture();
 		const { stdout, error } = await runCommand([
@@ -837,7 +882,7 @@ describe("polypot translate", () => {
 			const configPath = path.join(projectDir, ".polypot", "config.yaml");
 			await fs.writeFile(
 				configPath,
-				"source:\n  potFilePath: messages.pot\n  targetLanguages:\n    - fr_FR\ndebug:\n  saveDebugInfo: true\n",
+				"source:\n  potFilePath: messages.pot\n  targetLanguages:\n    - fr_FR\noutput:\n  outputDir: languages\ndebug:\n  saveDebugInfo: true\n",
 			);
 			process.chdir(otherDir);
 
@@ -853,6 +898,9 @@ describe("polypot translate", () => {
 					readonly filePath: string;
 				};
 				readonly debugOutputFile: string;
+				readonly results: readonly {
+					readonly outputFile: string;
+				}[];
 				readonly status: string;
 			};
 
@@ -864,7 +912,56 @@ describe("polypot translate", () => {
 			expect(result.debugOutputFile).to.include(
 				path.join(projectDir, ".polypot", "debug"),
 			);
+			expect(result.results[0]?.outputFile).to.equal(
+				path.join(projectDir, "languages", "fr_FR.po"),
+			);
 			await fs.access(result.debugOutputFile);
+		} finally {
+			process.chdir(previousCwd);
+			await fs.rm(projectDir, { recursive: true, force: true });
+			await fs.rm(otherDir, { recursive: true, force: true });
+		}
+	});
+
+	it("writes config-sourced output files relative to an explicit project config file", async () => {
+		const previousCwd = process.cwd();
+		const projectDir = await fs.mkdtemp(
+			path.join(os.tmpdir(), "polypot-translate-config-output-"),
+		);
+		const otherDir = await fs.mkdtemp(
+			path.join(os.tmpdir(), "polypot-translate-other-cwd-"),
+		);
+
+		try {
+			await fs.mkdir(path.join(projectDir, ".polypot"));
+			await fs.writeFile(
+				path.join(projectDir, "messages.pot"),
+				POT_FIXTURE,
+			);
+			const configPath = path.join(projectDir, ".polypot", "config.yaml");
+			await fs.writeFile(
+				configPath,
+				"source:\n  potFilePath: messages.pot\n  targetLanguages:\n    - fr_FR\noutput:\n  outputFormat: json\n  outputFile: preview.json\n",
+			);
+			process.chdir(otherDir);
+
+			const { error } = await runCommand([
+				"translate",
+				"--config",
+				configPath,
+				"--dry-run",
+				"--verbose-level",
+				"0",
+			]);
+			const outputFile = path.join(projectDir, "preview.json");
+			const result = JSON.parse(
+				await fs.readFile(outputFile, "utf8"),
+			) as {
+				readonly status: string;
+			};
+
+			expect(error).to.equal(undefined);
+			expect(result.status).to.equal("previewed");
 		} finally {
 			process.chdir(previousCwd);
 			await fs.rm(projectDir, { recursive: true, force: true });

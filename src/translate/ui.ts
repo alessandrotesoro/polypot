@@ -12,6 +12,7 @@ import { analyzePotFile, type PotAnalysis } from "./pot.js";
 import {
 	buildTranslateWorkload,
 	type LanguageWorkPlan,
+	type LocaleFormat,
 	type TranslatePreviewWorkload,
 	type TranslationEstimate,
 } from "./workload.js";
@@ -28,6 +29,7 @@ interface TranslateUiPreviewOptions {
 	readonly dryRun: boolean;
 	readonly jobs: number;
 	readonly languages: readonly string[];
+	readonly localeFormat: LocaleFormat;
 	readonly maxCost?: number;
 	readonly maxStringsPerJob?: number;
 	readonly maxTotalStrings?: number;
@@ -64,7 +66,7 @@ export interface TranslateSettingsSnapshot {
 		readonly maxTotalStrings?: number;
 	};
 	readonly output: {
-		readonly localeFormat: string;
+		readonly localeFormat: LocaleFormat;
 		readonly outputDir: string;
 		readonly outputFile?: string;
 		readonly outputFormat: string;
