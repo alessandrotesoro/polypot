@@ -7,114 +7,46 @@ import {
 	type ListrTask,
 } from "listr2";
 import color from "yoctocolors";
-import type { PolypotSecrets } from "../config/secrets.js";
 import { sanitizeTerminalText } from "../terminal.js";
+import {
+	knownTranslationEstimate,
+	unknownTranslationEstimate,
+} from "./cost.js";
+import type {
+	TranslateExecutionPlan,
+	TranslateExecutionPlanResult,
+	TranslateInputPlan,
+	TranslatePlanBlocker,
+	TranslatePlanBlockerCode,
+	TranslateSettingsSnapshot,
+	TranslateUiPreviewOptions,
+} from "./execution-plan.js";
 import {
 	type ExecuteTranslateOptions,
 	executeTranslate,
 	type TranslationProgressEvent,
 } from "./executor.js";
-import { analyzePotFile, type PotAnalysis } from "./pot.js";
+import type { PotAnalysis } from "./pot.js";
 import type {
 	TranslationLanguageResult,
 	TranslationRunResult,
 	TranslationRunStatus,
 } from "./results.js";
-import {
-	buildTranslateOutputFile,
-	buildTranslateWorkload,
-	type LocaleFormat,
-	type TranslatePreviewWorkload,
-	type TranslationEstimate,
+import type {
+	TranslatePreviewWorkload,
+	TranslationEstimate,
 } from "./workload.js";
 
-export type { TranslationEstimate } from "./workload.js";
+export type {
+	TranslateSettingsSnapshot,
+	TranslationEstimate,
+} from "./execution-plan.js";
 
 const PROGRESS_BAR_SIZE = 24;
 const numberFormatter = new Intl.NumberFormat("en-US");
 type TranslateDebugEntry = NonNullable<
 	TranslationLanguageResult["debug"]
 >[number];
-
-interface TranslateUiPreviewOptions {
-	readonly batchSize: number;
-	readonly dryRun: boolean;
-	readonly jobs: number;
-	readonly languages: readonly string[];
-	readonly localeFormat: LocaleFormat;
-	readonly maxCost?: number;
-	readonly maxStringsPerJob?: number;
-	readonly maxTotalStrings?: number;
-	readonly outputDir: string;
-	readonly outputFormat: string;
-	readonly poFilePrefix?: string;
-	readonly sourceLanguage: string;
-	readonly verboseLevel: number;
-}
-
-interface TranslateConfigSnapshot {
-	readonly forceTranslate: boolean;
-	readonly model: string;
-	readonly potFilePath?: string;
-	readonly provider: string;
-}
-
-export interface TranslateSettingsSnapshot {
-	readonly behavior: {
-		readonly dictionaryPath: string;
-		readonly forceTranslate: boolean;
-		readonly poHeaderTemplatePath: string;
-		readonly promptFilePath: string;
-		readonly useDictionary: boolean;
-	};
-	readonly debug: {
-		readonly dryRun: boolean;
-		readonly saveDebugInfo: boolean;
-		readonly verboseLevel: number;
-	};
-	readonly limits: {
-		readonly maxCost?: number;
-		readonly maxStringsPerJob?: number;
-		readonly maxTotalStrings?: number;
-	};
-	readonly output: {
-		readonly localeFormat: LocaleFormat;
-		readonly outputDir: string;
-		readonly outputFile?: string;
-		readonly outputFormat: string;
-		readonly poFilePrefix?: string;
-	};
-	readonly performance: {
-		readonly batchSize: number;
-		readonly jobs: number;
-		readonly timeout: number;
-	};
-	readonly provider: {
-		readonly maxTokens?: number;
-		readonly model: string;
-		readonly provider: string;
-		readonly temperature: number | string;
-	};
-	readonly retries: {
-		readonly abortOnFailure: boolean;
-		readonly maxRetries: number;
-		readonly retryDelay: number;
-		readonly skipLanguageOnFailure: boolean;
-	};
-	readonly source: {
-		readonly inputPoPath?: string;
-		readonly potFilePath?: string;
-		readonly sourceLanguage: string;
-		readonly targetLanguages: readonly string[];
-	};
-}
-
-interface TranslateUiPlan {
-	readonly config: TranslateConfigSnapshot;
-	readonly preview: TranslateUiPreviewOptions;
-	readonly secrets: PolypotSecrets;
-	readonly settings: TranslateSettingsSnapshot;
-}
 
 export interface LanguagePreviewResult {
 	readonly batches: number;
@@ -124,6 +56,7 @@ export interface LanguagePreviewResult {
 	readonly language: string;
 	readonly mergedFromExisting?: number;
 	readonly outputFile: string;
+	readonly skipReason?: TranslationLanguageResult["skipReason"];
 	readonly skippedByExisting?: number;
 	readonly skippedByCost: number;
 	readonly skippedByLimit: number;
@@ -145,14 +78,11 @@ export interface TranslateUiResult {
 		readonly totalStrings: number;
 	};
 	readonly error?: {
-		readonly code:
-			| "missing_pot_file_path"
-			| "missing_target_languages"
-			| "duplicate_output_file"
-			| "pot_analysis_failed"
-			| "unsupported_provider";
+		readonly code: TranslatePlanBlockerCode;
+		readonly collisions?: TranslatePlanBlocker["collisions"];
 		readonly message: string;
 		readonly potFilePath?: string;
+		readonly suppressOutputFile?: boolean;
 	};
 	readonly implemented: boolean;
 	readonly mode: "dry-run" | "translate";
@@ -230,10 +160,6 @@ function formatDuration(ms: number): string {
 		: `${minutes}m ${remainingSeconds}s`;
 }
 
-function formatError(error: unknown): string {
-	return error instanceof Error ? error.message : String(error);
-}
-
 function getConcurrentJobs(preview: TranslateUiPreviewOptions): number {
 	return Math.max(1, Math.min(preview.jobs, preview.languages.length));
 }
@@ -263,35 +189,6 @@ function formatLimits(preview: TranslateUiPreviewOptions): string {
 
 function formatPath(value: string): string {
 	return sanitizeTerminalText(value);
-}
-
-function findDuplicateOutputFile(
-	preview: TranslateUiPreviewOptions,
-): { file: string; languages: readonly string[] } | undefined {
-	const languagesByFile = new Map<string, string[]>();
-
-	for (const language of preview.languages) {
-		const outputFile = buildTranslateOutputFile(
-			{
-				localeFormat: preview.localeFormat,
-				outputDir: preview.outputDir,
-				...(preview.poFilePrefix !== undefined && {
-					poFilePrefix: preview.poFilePrefix,
-				}),
-			},
-			language,
-		);
-		languagesByFile.set(outputFile, [
-			...(languagesByFile.get(outputFile) ?? []),
-			language,
-		]);
-	}
-
-	for (const [file, languages] of languagesByFile) {
-		if (languages.length > 1) return { file, languages };
-	}
-
-	return undefined;
 }
 
 function formatLanguage(value: string): string {
@@ -376,7 +273,9 @@ function buildSummaryFromResult(result: TranslateUiResult): string {
 	const cost =
 		result.cost?.totalCost ??
 		result.results.reduce(
-			(total, language) => total + language.estimate.cost,
+			(total, language) =>
+				total +
+				(language.estimate.costKnown ? language.estimate.cost : 0),
 			0,
 		);
 
@@ -425,7 +324,7 @@ function appendDryRunSummary(
 }
 
 function buildBaseResult(
-	plan: TranslateUiPlan,
+	plan: TranslateInputPlan,
 ): Omit<TranslateUiResult, "analysis" | "results" | "status" | "summary"> {
 	const { config, preview } = plan;
 
@@ -465,7 +364,7 @@ function resolveTemperature(value: number | string): number {
 }
 
 function buildExecuteOptions(
-	plan: TranslateUiPlan,
+	plan: TranslateExecutionPlan,
 	onProgress?: (event: TranslationProgressEvent) => void,
 ): ExecuteTranslateOptions {
 	const { config, preview, settings } = plan;
@@ -477,14 +376,17 @@ function buildExecuteOptions(
 		abortOnFailure: settings.retries.abortOnFailure,
 		batchSize: preview.batchSize,
 		dictionaryPath: settings.behavior.dictionaryPath,
+		document: plan.document,
 		dryRun: preview.dryRun,
 		forceTranslate: config.forceTranslate,
 		jobs: preview.jobs,
 		localeFormat: preview.localeFormat,
 		maxRetries: settings.retries.maxRetries,
+		mergeSources: plan.mergeSources,
 		model: config.model,
 		outputDir: preview.outputDir,
 		potFilePath: config.potFilePath,
+		provider: config.provider,
 		retryDelay: settings.retries.retryDelay,
 		saveDebugInfo: settings.debug.saveDebugInfo,
 		secrets: plan.secrets,
@@ -524,20 +426,33 @@ function buildExecuteOptions(
 
 function toUiLanguageResult(
 	language: TranslationLanguageResult,
+	workloadLanguage?: TranslatePreviewWorkload["languages"][number],
 ): LanguagePreviewResult {
 	return {
 		batches: language.batches,
-		estimate: {
-			cost: language.cost.totalCost,
-			inputTokens: language.cost.promptTokens,
-			outputTokens: language.cost.completionTokens,
-			totalTokens: language.cost.totalTokens,
-		},
+		estimate:
+			language.costKnown === false
+				? (workloadLanguage?.estimate ??
+					unknownTranslationEstimate({
+						inputTokens: language.cost.promptTokens,
+						outputTokens: language.cost.completionTokens,
+						unavailableReason:
+							language.costUnavailableReason ??
+							"Provider-specific price estimate is unavailable.",
+					}))
+				: knownTranslationEstimate({
+						cost: language.cost.totalCost,
+						inputTokens: language.cost.promptTokens,
+						outputTokens: language.cost.completionTokens,
+					}),
 		language: language.language,
 		...(language.error !== undefined && { error: language.error }),
 		failed: language.failed,
 		mergedFromExisting: language.mergedFromExisting,
 		outputFile: language.outputFile,
+		...(language.skipReason !== undefined && {
+			skipReason: language.skipReason,
+		}),
 		skippedByExisting: language.skippedByExisting,
 		skippedByCost: language.skippedByCost,
 		skippedByLimit: language.skippedByLimit,
@@ -551,7 +466,7 @@ function toUiLanguageResult(
 }
 
 function toUiResult(
-	plan: TranslateUiPlan,
+	plan: TranslateExecutionPlan,
 	result: TranslationRunResult,
 ): TranslateUiResult {
 	const baseResult = buildBaseResult(plan);
@@ -566,7 +481,15 @@ function toUiResult(
 			sourceCharacters: result.analysis.sourceCharacters,
 			totalStrings: result.analysis.totalStrings,
 		},
-		results: result.results.map(toUiLanguageResult),
+		results: result.results.map((language) =>
+			toUiLanguageResult(
+				language,
+				plan.workload.languages.find(
+					(workloadLanguage) =>
+						workloadLanguage.language === language.language,
+				),
+			),
+		),
 		status: result.status,
 		summary: result.summary,
 		cost: result.cost,
@@ -700,7 +623,7 @@ function formatExecutionTitle(
 }
 
 async function runTranslateExecution(
-	plan: TranslateUiPlan,
+	plan: TranslateExecutionPlan,
 	renderer: ListrRendererValue,
 ): Promise<TranslateUiResult> {
 	if (renderer === "silent") {
@@ -761,106 +684,62 @@ async function runTranslateExecution(
 	return toUiResult(plan, executionResult);
 }
 
+function blockedSummary(blocker: TranslatePlanBlocker): string {
+	if (
+		blocker.code === "pot_analysis_failed" &&
+		blocker.potFilePath !== undefined
+	) {
+		return `Cannot read or parse POT file at ${sanitizeTerminalText(blocker.potFilePath)}: ${sanitizeTerminalText(blocker.message)}`;
+	}
+
+	return sanitizeTerminalText(blocker.message);
+}
+
+function toBlockedUiResult(options: {
+	readonly blocker: TranslatePlanBlocker;
+	readonly input: TranslateInputPlan;
+}): TranslateUiResult {
+	const baseResult = buildBaseResult(options.input);
+
+	return {
+		...baseResult,
+		error: {
+			code: options.blocker.code,
+			...(options.blocker.collisions !== undefined && {
+				collisions: options.blocker.collisions,
+			}),
+			message: options.blocker.message,
+			...(options.blocker.potFilePath !== undefined && {
+				potFilePath: options.blocker.potFilePath,
+			}),
+			...(options.blocker.suppressOutputFile !== undefined && {
+				suppressOutputFile: options.blocker.suppressOutputFile,
+			}),
+		},
+		results: [],
+		status: "blocked",
+		summary: blockedSummary(options.blocker),
+	};
+}
+
 export async function runTranslateUiPreview(
-	plan: TranslateUiPlan,
+	planResult: TranslateExecutionPlanResult,
 ): Promise<TranslateUiResult> {
-	const { config, preview } = plan;
-	const baseResult = buildBaseResult(plan);
-
-	if (preview.languages.length === 0) {
-		const message =
-			"No target languages are configured. Add --target-languages or set source.targetLanguages in Polypot config.";
-
-		return {
-			...baseResult,
-			error: {
-				code: "missing_target_languages",
-				message,
-			},
-			results: [],
-			status: "blocked",
-			summary: message,
-		};
+	if (!planResult.ok) {
+		return toBlockedUiResult({
+			blocker: planResult.blocker,
+			input: planResult.input,
+		});
 	}
 
-	if (config.potFilePath === undefined) {
-		const message =
-			"No POT file path is configured. Add --pot-file-path or set source.potFilePath in Polypot config.";
-
-		return {
-			...baseResult,
-			error: {
-				code: "missing_pot_file_path",
-				message,
-			},
-			results: [],
-			status: "blocked",
-			summary: message,
-		};
+	const { plan } = planResult;
+	const renderer = getRenderer(plan.preview);
+	if (renderer !== "silent") {
+		process.stdout.write(buildPreflight(plan.preview, plan.workload));
 	}
 
-	const duplicateOutputFile = findDuplicateOutputFile(preview);
-	if (duplicateOutputFile !== undefined) {
-		const message = `Multiple target languages resolve to the same output file ${sanitizeTerminalText(duplicateOutputFile.file)}: ${duplicateOutputFile.languages.map(formatLanguage).join(", ")}. Use a locale format that keeps them distinct.`;
-
-		return {
-			...baseResult,
-			error: {
-				code: "duplicate_output_file",
-				message,
-			},
-			results: [],
-			status: "blocked",
-			summary: message,
-		};
-	}
-
-	if (config.provider !== "openai") {
-		const message = `Provider ${sanitizeTerminalText(config.provider)} is not supported by translate yet. Use --provider openai.`;
-
-		return {
-			...baseResult,
-			error: {
-				code: "unsupported_provider",
-				message,
-			},
-			results: [],
-			status: "blocked",
-			summary: message,
-		};
-	}
-
-	const renderer = getRenderer(preview);
-	let analysis: PotAnalysis;
-	try {
-		analysis = await analyzePotFile(config.potFilePath);
-	} catch (error) {
-		const message = formatError(error);
-
-		return {
-			...baseResult,
-			error: {
-				code: "pot_analysis_failed",
-				message,
-				potFilePath: config.potFilePath,
-			},
-			results: [],
-			status: "blocked",
-			summary: `Cannot read or parse POT file at ${sanitizeTerminalText(config.potFilePath)}: ${sanitizeTerminalText(message)}`,
-		};
-	}
-
-	const workload = buildTranslateWorkload(preview, analysis);
-	if (renderer === "silent") {
-		return appendDryRunSummary(
-			preview,
-			await runTranslateExecution(plan, renderer),
-		);
-	}
-
-	process.stdout.write(buildPreflight(preview, workload));
 	return appendDryRunSummary(
-		preview,
+		plan.preview,
 		await runTranslateExecution(plan, renderer),
 	);
 }

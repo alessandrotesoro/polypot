@@ -76,6 +76,53 @@ describe("loadPolypotConfig", () => {
 		expect(runtime.config.source.targetLanguages).to.deep.equal(["fr_FR"]);
 	});
 
+	it("records path value provenance for global and project config layers", async () => {
+		const configDir = await tempConfigDir();
+		const projectDir = await tempConfigDir();
+		const globalConfigPath = path.join(configDir, "config.yaml");
+		const projectConfigPath = path.join(
+			projectDir,
+			".polypot",
+			"config.yaml",
+		);
+		await fs.writeFile(
+			globalConfigPath,
+			"behavior:\n  dictionaryPath: dictionaries\n  promptFilePath: prompt.md\n",
+		);
+		await fs.mkdir(path.dirname(projectConfigPath));
+		await fs.writeFile(
+			projectConfigPath,
+			"source:\n  potFilePath: messages.pot\noutput:\n  outputDir: languages\n",
+		);
+
+		const runtime = await loadPolypotRuntimeConfig({
+			configDir,
+			cwd: projectDir,
+			options: {},
+		});
+
+		expect(runtime.sources.paths["behavior.dictionaryPath"]).to.deep.equal({
+			filePath: globalConfigPath,
+			kind: "global",
+			rootDir: configDir,
+		});
+		expect(runtime.sources.paths["behavior.promptFilePath"]).to.deep.equal({
+			filePath: globalConfigPath,
+			kind: "global",
+			rootDir: configDir,
+		});
+		expect(runtime.sources.paths["source.potFilePath"]).to.deep.equal({
+			filePath: projectConfigPath,
+			kind: "project",
+			rootDir: projectDir,
+		});
+		expect(runtime.sources.paths["output.outputDir"]).to.deep.equal({
+			filePath: projectConfigPath,
+			kind: "project",
+			rootDir: projectDir,
+		});
+	});
+
 	it("loads project secrets over global secrets", async () => {
 		const configDir = await tempConfigDir();
 		const projectDir = await tempConfigDir();
@@ -165,6 +212,38 @@ describe("loadPolypotConfig", () => {
 		});
 
 		expect(runtime.config.provider.model).to.equal("explicit-model");
+	});
+
+	it("records explicit config path provenance relative to the config project directory", async () => {
+		const configDir = await tempConfigDir();
+		const projectDir = await tempConfigDir();
+		const explicitConfigPath = path.join(
+			projectDir,
+			".polypot",
+			"config.yaml",
+		);
+		await fs.mkdir(path.dirname(explicitConfigPath));
+		await fs.writeFile(
+			explicitConfigPath,
+			"source:\n  inputPoPath: base.po\noutput:\n  outputFile: preview.json\n",
+		);
+
+		const runtime = await loadPolypotRuntimeConfig({
+			configDir,
+			cwd: configDir,
+			options: { configPath: explicitConfigPath },
+		});
+
+		expect(runtime.sources.paths["source.inputPoPath"]).to.deep.equal({
+			filePath: explicitConfigPath,
+			kind: "explicit",
+			rootDir: projectDir,
+		});
+		expect(runtime.sources.paths["output.outputFile"]).to.deep.equal({
+			filePath: explicitConfigPath,
+			kind: "explicit",
+			rootDir: projectDir,
+		});
 	});
 
 	it("reports malformed project YAML with project path context", async () => {

@@ -4,19 +4,34 @@ const PRINTF_PLACEHOLDER_PATTERN =
 	/%(?:\d+\$)?[-+0 '#]*(?:\*|\d+)?(?:\.(?:\*|\d+))?[bcdeEfFgGosuxX]/g;
 const NUMERIC_PLACEHOLDER_PATTERN =
 	/^%(?:\d+\$)?[-+0 '#]*(?:\*|\d+)?(?:\.(?:\*|\d+))?[dfueEfFgGuxX]$/;
+const TAG_TOKEN_PATTERN = /<\/?[A-Za-z][A-Za-z0-9:-]*(?:\s+[^<>]*?)?\/?>/g;
+const SHORTCODE_TOKEN_PATTERN = /\[\/?[A-Za-z][A-Za-z0-9_:-]*(?:\s+[^\]]*)?\]/g;
+
+export interface ProtectedTokens {
+	readonly printf: readonly string[];
+	readonly shortcodes: readonly string[];
+	readonly tags: readonly string[];
+}
 
 export interface TranslationValidationIssue {
 	readonly entryKey: string;
 	readonly expected: readonly string[];
 	readonly form: number;
 	readonly got: readonly string[];
-	readonly reason: "placeholder_mismatch" | "plural_form_count";
+	readonly reason:
+		| "placeholder_mismatch"
+		| "printf_placeholder_mismatch"
+		| "plural_form_count"
+		| "shortcode_mismatch"
+		| "tag_mismatch";
 }
 
 export interface TranslationValidationStats {
 	readonly blankedStrings: readonly TranslationValidationIssue[];
 	readonly placeholderMismatches: number;
 	readonly pluralFormIssues: number;
+	readonly shortcodeMismatches?: number;
+	readonly tagMismatches?: number;
 }
 
 export interface ValidatedTranslation {
@@ -29,6 +44,8 @@ export function createEmptyValidationStats(): TranslationValidationStats {
 		blankedStrings: [],
 		placeholderMismatches: 0,
 		pluralFormIssues: 0,
+		shortcodeMismatches: 0,
+		tagMismatches: 0,
 	};
 }
 
@@ -38,6 +55,14 @@ export function extractPlaceholders(value: string): readonly string[] {
 			.replaceAll("%%", "\u0000\u0000")
 			.match(PRINTF_PLACEHOLDER_PATTERN) ?? []
 	);
+}
+
+export function extractProtectedTokens(value: string): ProtectedTokens {
+	return {
+		printf: extractPlaceholders(value),
+		shortcodes: value.match(SHORTCODE_TOKEN_PATTERN) ?? [],
+		tags: value.match(TAG_TOKEN_PATTERN) ?? [],
+	};
 }
 
 function hasExplicitPosition(placeholder: string): boolean {
@@ -135,6 +160,23 @@ function getSourceForForm(entry: PotEntry, form: number): string {
 	return form === 0 ? entry.msgid : (entry.msgidPlural ?? entry.msgid);
 }
 
+function pushMismatchIssue(options: {
+	readonly entry: PotEntry;
+	readonly expected: readonly string[];
+	readonly form: number;
+	readonly got: readonly string[];
+	readonly issues: TranslationValidationIssue[];
+	readonly reason: TranslationValidationIssue["reason"];
+}): void {
+	options.issues.push({
+		entryKey: options.entry.key,
+		expected: options.expected,
+		form: options.form,
+		got: options.got,
+		reason: options.reason,
+	});
+}
+
 export function validateEntryTranslation(options: {
 	readonly entry: PotEntry;
 	readonly msgstr: readonly string[];
@@ -163,28 +205,55 @@ export function validateEntryTranslation(options: {
 		const translation = msgstr[form];
 		if (translation === undefined || translation.length === 0) continue;
 
-		const expected = extractPlaceholders(
-			getSourceForForm(options.entry, form),
-		);
-		const got = extractPlaceholders(translation);
-		const valid =
-			placeholdersMatch(expected, got) ||
+		const source = getSourceForForm(options.entry, form);
+		const expected = extractProtectedTokens(source);
+		const got = extractProtectedTokens(translation);
+		const printfValid =
+			placeholdersMatch(expected.printf, got.printf) ||
 			(options.entry.plural &&
 				canDropNumericPlaceholders({
-					expected,
+					expected: expected.printf,
 					form,
-					got,
+					got: got.printf,
 					pluralCount: options.pluralCount,
 				}));
+		const tagValid = arraysEqual(expected.tags, got.tags);
+		const shortcodeValid = arraysEqual(expected.shortcodes, got.shortcodes);
 
-		if (!valid) {
+		if (!printfValid || !tagValid || !shortcodeValid) {
 			msgstr[form] = "";
-			issues.push({
-				entryKey: options.entry.key,
-				expected,
+		}
+
+		if (!printfValid) {
+			pushMismatchIssue({
+				entry: options.entry,
+				expected: expected.printf,
 				form,
-				got,
-				reason: "placeholder_mismatch",
+				got: got.printf,
+				issues,
+				reason: "printf_placeholder_mismatch",
+			});
+		}
+
+		if (!tagValid) {
+			pushMismatchIssue({
+				entry: options.entry,
+				expected: expected.tags,
+				form,
+				got: got.tags,
+				issues,
+				reason: "tag_mismatch",
+			});
+		}
+
+		if (!shortcodeValid) {
+			pushMismatchIssue({
+				entry: options.entry,
+				expected: expected.shortcodes,
+				form,
+				got: got.shortcodes,
+				issues,
+				reason: "shortcode_mismatch",
 			});
 		}
 	}
@@ -201,10 +270,17 @@ export function summarizeValidationIssues(
 	return {
 		blankedStrings: issues,
 		placeholderMismatches: issues.filter(
-			(issue) => issue.reason === "placeholder_mismatch",
+			(issue) =>
+				issue.reason === "printf_placeholder_mismatch" ||
+				issue.reason === "placeholder_mismatch",
 		).length,
 		pluralFormIssues: issues.filter(
 			(issue) => issue.reason === "plural_form_count",
 		).length,
+		shortcodeMismatches: issues.filter(
+			(issue) => issue.reason === "shortcode_mismatch",
+		).length,
+		tagMismatches: issues.filter((issue) => issue.reason === "tag_mismatch")
+			.length,
 	};
 }

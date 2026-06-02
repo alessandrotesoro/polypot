@@ -6,6 +6,10 @@ import {
 	type GetTextTranslations,
 	po,
 } from "gettext-parser";
+import {
+	getTranslationFlags,
+	isCompleteExistingTranslation,
+} from "./completeness.js";
 import { getPluralCount, getPluralForms } from "./locales.js";
 import {
 	buildPoHeaders,
@@ -28,15 +32,6 @@ export interface PoOutputDocument {
 
 function cloneTranslations(data: GetTextTranslations): GetTextTranslations {
 	return structuredClone(data);
-}
-
-function isRealTranslation(msgstr: readonly string[] | undefined): boolean {
-	if (msgstr === undefined || msgstr.length === 0) return false;
-
-	return msgstr.some((value) => {
-		const trimmed = value.trim();
-		return trimmed.length > 0 && !trimmed.startsWith("[DRY RUN]");
-	});
 }
 
 function getContext(
@@ -147,7 +142,12 @@ export function mergeExistingPoData(options: {
 		if (
 			existing === undefined ||
 			target === undefined ||
-			!isRealTranslation(existing.msgstr)
+			!isCompleteExistingTranslation({
+				entry,
+				msgstr: existing.msgstr,
+				pluralCount: options.pluralCount,
+				translationFlags: getTranslationFlags(existing),
+			})
 		) {
 			continue;
 		}

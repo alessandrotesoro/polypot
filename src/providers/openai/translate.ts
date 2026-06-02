@@ -9,7 +9,10 @@ import {
 	buildSystemPrompt,
 	buildXmlPrompt,
 } from "../../translate/prompts.js";
-import type { TranslationValidationStats } from "../../translate/validation.js";
+import {
+	createEmptyValidationStats,
+	type TranslationValidationStats,
+} from "../../translate/validation.js";
 import {
 	type ParsedTranslation,
 	parseXmlResponse,
@@ -52,6 +55,7 @@ export type OpenAIClientFactory = (options: {
 export type OpenAITranslateBatchResult =
 	| {
 			readonly cost: OpenAICost;
+			readonly costKnown?: boolean;
 			readonly debug: {
 				readonly messages: readonly ChatCompletionMessageParam[];
 				readonly response?: string;
@@ -63,6 +67,7 @@ export type OpenAITranslateBatchResult =
 			readonly validationStats: TranslationValidationStats;
 	  }
 	| {
+			readonly cost?: OpenAICost;
 			readonly debug?: {
 				readonly messages: readonly ChatCompletionMessageParam[];
 				readonly response?: string;
@@ -193,6 +198,7 @@ function getValidationIssueCount(stats: TranslationValidationStats): number {
 class SemanticTranslationError extends Error {
 	public constructor(
 		message: string,
+		public readonly cost: OpenAICost,
 		public readonly response: string,
 	) {
 		super(message);
@@ -254,11 +260,7 @@ export async function translateOpenAIBatch(
 			missingEntries: options.entries,
 			ok: true,
 			translations: [],
-			validationStats: {
-				blankedStrings: [],
-				placeholderMismatches: 0,
-				pluralFormIssues: 0,
-			},
+			validationStats: createEmptyValidationStats(),
 		};
 	}
 
@@ -275,6 +277,7 @@ export async function translateOpenAIBatch(
 		apiKey: options.apiKey,
 		timeoutMs: options.timeoutSeconds * 1000,
 	});
+	let attemptCost: OpenAICost | undefined;
 	let lastError: unknown;
 	let lastResponse: string | undefined;
 
@@ -287,31 +290,65 @@ export async function translateOpenAIBatch(
 			);
 			const content = response.choices[0]?.message.content ?? "";
 			lastResponse = content;
+			const responseCost = calculateUsageCost(
+				response.usage,
+				options.model,
+				estimatedCost,
+			);
+			attemptCost =
+				attemptCost === undefined
+					? responseCost
+					: {
+							completionCost:
+								attemptCost.completionCost +
+								responseCost.completionCost,
+							completionTokens:
+								attemptCost.completionTokens +
+								responseCost.completionTokens,
+							fallbackPricing:
+								attemptCost.fallbackPricing ||
+								responseCost.fallbackPricing,
+							model: responseCost.model,
+							promptCost:
+								attemptCost.promptCost +
+								responseCost.promptCost,
+							promptTokens:
+								attemptCost.promptTokens +
+								responseCost.promptTokens,
+							totalCost:
+								attemptCost.totalCost + responseCost.totalCost,
+							totalTokens:
+								attemptCost.totalTokens +
+								responseCost.totalTokens,
+						};
 			const parsed = parseXmlResponse({
 				dictionaryCount: options.dictionaryMatches?.length ?? 0,
 				entries: options.entries,
 				pluralCount: options.pluralCount,
 				xml: content,
 			});
+			const emptyTranslationCount = parsed.translations.filter(
+				(translation) =>
+					translation.msgstr.every((value) => value.length === 0),
+			).length;
 			const semanticIssueCount =
 				parsed.missingEntries.length +
 				getValidationIssueCount(parsed.validationStats) +
-				parsed.translations.filter((translation) =>
-					translation.msgstr.every((value) => value.length === 0),
-				).length;
-			if (semanticIssueCount > 0) {
+				emptyTranslationCount;
+			const hasUsableTranslation = parsed.translations.some(
+				(translation) =>
+					translation.msgstr.some((value) => value.length > 0),
+			);
+			if (semanticIssueCount > 0 && !hasUsableTranslation) {
 				throw new SemanticTranslationError(
 					`Model response did not satisfy the translation contract (${semanticIssueCount} issue${semanticIssueCount === 1 ? "" : "s"}).`,
+					responseCost,
 					content,
 				);
 			}
 
 			return {
-				cost: calculateUsageCost(
-					response.usage,
-					options.model,
-					estimatedCost,
-				),
+				cost: attemptCost ?? responseCost,
 				debug: { messages, response: content },
 				dryRun: false,
 				missingEntries: parsed.missingEntries,
@@ -329,6 +366,7 @@ export async function translateOpenAIBatch(
 	}
 
 	return {
+		...(attemptCost !== undefined && { cost: attemptCost }),
 		debug: {
 			messages,
 			...(lastResponse !== undefined && { response: lastResponse }),

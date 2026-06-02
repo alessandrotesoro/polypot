@@ -86,6 +86,19 @@ describe("translation prompts", () => {
 		expect(prompt.xmlPrompt).to.include("<f1>translation for form 1</f1>");
 	});
 
+	it("includes protected tags and bracket tokens in prompt metadata", () => {
+		const prompt = buildXmlPrompt({
+			entries: [entry("Click <strong>%s</strong> [link]")],
+			pluralCount: 2,
+			targetLanguage: "fr_FR",
+		});
+
+		expect(prompt.xmlPrompt).to.include("%s");
+		expect(prompt.xmlPrompt).to.include("&lt;strong&gt;");
+		expect(prompt.xmlPrompt).to.include("&lt;/strong&gt;");
+		expect(prompt.xmlPrompt).to.include("[link]");
+	});
+
 	it("builds dictionary response examples", () => {
 		expect(
 			buildDictionaryResponse([{ source: "cart", target: "panier" }]),

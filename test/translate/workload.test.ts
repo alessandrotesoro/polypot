@@ -1,4 +1,5 @@
 import { expect } from "chai";
+import { knownTranslationEstimate } from "../../src/translate/cost.js";
 import type { PotAnalysis } from "../../src/translate/pot.js";
 import { buildTranslateWorkload } from "../../src/translate/workload.js";
 
@@ -70,6 +71,12 @@ describe("buildTranslateWorkload", () => {
 		const workload = buildTranslateWorkload(
 			{
 				batchSize: 20,
+				estimateCost: (sourceCharacters) =>
+					knownTranslationEstimate({
+						cost: sourceCharacters / 1_000_000,
+						inputTokens: sourceCharacters,
+						outputTokens: 0,
+					}),
 				languages: ["fr_FR", "es_ES"],
 				localeFormat: "target_lang",
 				maxCost: 0.0012,

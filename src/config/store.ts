@@ -38,6 +38,8 @@ interface ConfigStatus {
 interface ConfigInputStatus {
 	readonly config: PolypotConfigInput;
 	readonly exists: boolean;
+	readonly filePath: string;
+	readonly rootDir: string;
 }
 
 /**
@@ -221,10 +223,27 @@ async function readStoreConfigInputStatus(
 ): Promise<ConfigInputStatus> {
 	try {
 		const raw = await readOptionalUtf8File(paths.config);
-		if (raw === undefined) return { config: {}, exists: false };
+		if (raw === undefined)
+			return {
+				config: {},
+				exists: false,
+				filePath: paths.config,
+				rootDir:
+					paths.label === "project"
+						? path.dirname(paths.configDirectory)
+						: paths.configDirectory,
+			};
 		const config = parsePolypotConfigInput(raw);
 		PolypotConfigSchema.parse(config);
-		return { config, exists: true };
+		return {
+			config,
+			exists: true,
+			filePath: paths.config,
+			rootDir:
+				paths.label === "project"
+					? path.dirname(paths.configDirectory)
+					: paths.configDirectory,
+		};
 	} catch (error) {
 		throw new Error(
 			`Failed to read ${paths.label} config at ${paths.config}: ${formatError(error)}`,

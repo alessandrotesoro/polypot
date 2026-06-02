@@ -185,6 +185,142 @@ describe("translateOpenAIBatch", () => {
 		expect(result.debug?.response).to.equal('<t i="1"></t>');
 	});
 
+	it("returns partial valid translations instead of discarding a mixed response", async () => {
+		const calls: unknown[] = [];
+		const result = await translateOpenAIBatch(
+			buildOptions({
+				entries: [entry("Hello"), entry("Save")],
+			}),
+			clientFactory({
+				calls,
+				response: {
+					choices: [
+						{
+							message: {
+								content: '<t i="1">Bonjour</t>',
+							},
+						},
+					],
+					usage: {
+						completion_tokens: 5,
+						prompt_tokens: 10,
+						total_tokens: 15,
+					},
+				},
+			}),
+		);
+
+		expect(result.ok).to.equal(true);
+		if (!result.ok) throw new Error(result.error);
+		expect(result.translations[0]?.msgstr).to.deep.equal(["Bonjour"]);
+		expect(result.missingEntries.map((item) => item.msgid)).to.deep.equal([
+			"Save",
+		]);
+		expect(calls).to.have.length(1);
+	});
+
+	it("returns valid translations when another item is rejected by validation", async () => {
+		const result = await translateOpenAIBatch(
+			buildOptions({
+				entries: [entry("Hello %s"), entry("Save")],
+			}),
+			clientFactory({
+				calls: [],
+				response: {
+					choices: [
+						{
+							message: {
+								content:
+									'<t i="1">Bonjour</t><t i="2">Enregistrer</t>',
+							},
+						},
+					],
+					usage: {
+						completion_tokens: 5,
+						prompt_tokens: 10,
+						total_tokens: 15,
+					},
+				},
+			}),
+		);
+
+		expect(result.ok).to.equal(true);
+		if (!result.ok) throw new Error(result.error);
+		expect(result.translations).to.have.length(2);
+		expect(result.translations[0]?.msgstr).to.deep.equal([""]);
+		expect(result.translations[1]?.msgstr).to.deep.equal(["Enregistrer"]);
+		expect(result.validationStats.placeholderMismatches).to.equal(1);
+		expect(result.cost.totalTokens).to.equal(15);
+	});
+
+	it("reports paid attempt cost for malformed responses with usage", async () => {
+		const result = await translateOpenAIBatch(
+			buildOptions({ maxRetries: 0 }),
+			clientFactory({
+				calls: [],
+				response: {
+					choices: [{ message: { content: '<t i="1"></t>' } }],
+					usage: {
+						completion_tokens: 5,
+						prompt_tokens: 10,
+						total_tokens: 15,
+					},
+				},
+			}),
+		);
+
+		expect(result.ok).to.equal(false);
+		if (result.ok) throw new Error("expected failure");
+		expect(result.cost?.totalTokens).to.equal(15);
+	});
+
+	it("accumulates semantic retry costs before a later successful response", async () => {
+		const calls: unknown[] = [];
+		const responses: OpenAIChatCompletionResponse[] = [
+			{
+				choices: [{ message: { content: '<t i="1"></t>' } }],
+				usage: {
+					completion_tokens: 5,
+					prompt_tokens: 10,
+					total_tokens: 15,
+				},
+			},
+			{
+				choices: [{ message: { content: '<t i="1">Bonjour</t>' } }],
+				usage: {
+					completion_tokens: 10,
+					prompt_tokens: 20,
+					total_tokens: 30,
+				},
+			},
+		];
+		const result = await translateOpenAIBatch(
+			buildOptions({ maxRetries: 1 }),
+			() => ({
+				chat: {
+					completions: {
+						create: async (body) => {
+							calls.push(body);
+							const response = responses.shift();
+							if (response === undefined) {
+								throw new Error("unexpected extra request");
+							}
+
+							return response;
+						},
+					},
+				},
+			}),
+		);
+
+		expect(result.ok).to.equal(true);
+		if (!result.ok) throw new Error(result.error);
+		expect(calls).to.have.length(2);
+		expect(result.cost.promptTokens).to.equal(30);
+		expect(result.cost.completionTokens).to.equal(15);
+		expect(result.cost.totalTokens).to.equal(45);
+	});
+
 	it("redacts API keys from provider error messages", async () => {
 		const calls: unknown[] = [];
 		const result = await translateOpenAIBatch(

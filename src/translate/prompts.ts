@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import type { DictionaryMatch } from "./dictionary.js";
 import type { PotEntry } from "./pot.js";
-import { extractPlaceholders } from "./validation.js";
+import { extractProtectedTokens } from "./validation.js";
 import { escapeXml } from "./xml.js";
 
 const DEFAULT_TRANSLATION_PROMPT = `You are a professional software localization translator.
@@ -33,9 +33,14 @@ function replacePromptVariables(options: {
 }
 
 function getPlaceholderAttribute(entry: PotEntry): string {
+	const sourceTokens = [
+		extractProtectedTokens(entry.msgid),
+		extractProtectedTokens(entry.msgidPlural ?? ""),
+	];
 	const placeholders = [
-		...extractPlaceholders(entry.msgid),
-		...extractPlaceholders(entry.msgidPlural ?? ""),
+		...sourceTokens.flatMap((tokens) => tokens.printf),
+		...sourceTokens.flatMap((tokens) => tokens.tags),
+		...sourceTokens.flatMap((tokens) => tokens.shortcodes),
 	];
 
 	return placeholders.length === 0

@@ -1,9 +1,17 @@
 import path from "node:path";
+import {
+	addTranslationEstimates,
+	getKnownCost,
+	type TranslationCostEstimator,
+	type TranslationEstimate,
+	unknownTranslationEstimate,
+	ZERO_TRANSLATION_ESTIMATE,
+} from "./cost.js";
+import { getBaseLanguage, normalizeLocale } from "./locales.js";
 import type { PotAnalysis, PotSourceString } from "./pot.js";
 
 const ESTIMATED_CHARS_PER_TOKEN = 4;
 const ESTIMATED_OUTPUT_TOKEN_MULTIPLIER = 1.35;
-const PREVIEW_COST_PER_1000_TOKENS = 0.002;
 const ISO_639_2_LANGUAGE_CODES: Readonly<Record<string, string>> = {
 	af: "afr",
 	ak: "aka",
@@ -93,6 +101,7 @@ const ISO_639_2_LANGUAGE_CODES: Readonly<Record<string, string>> = {
 
 export interface TranslateWorkloadOptions {
 	readonly batchSize: number;
+	readonly estimateCost?: TranslationCostEstimator;
 	readonly languages: readonly string[];
 	readonly localeFormat: LocaleFormat;
 	readonly maxCost?: number;
@@ -108,12 +117,7 @@ export type LocaleFormat =
 	| "target_lang"
 	| "wp_locale";
 
-export interface TranslationEstimate {
-	readonly cost: number;
-	readonly inputTokens: number;
-	readonly outputTokens: number;
-	readonly totalTokens: number;
-}
+export type { TranslationEstimate } from "./cost.js";
 
 export interface LanguageWorkPlan {
 	readonly batches: number;
@@ -154,8 +158,8 @@ function formatOutputLocale(
 	language: string,
 	localeFormat: LocaleFormat,
 ): string {
-	const normalized = language.replaceAll("-", "_");
-	const languageCode = normalized.split("_")[0] ?? normalized;
+	const normalized = normalizeLocale(language);
+	const languageCode = getBaseLanguage(language);
 
 	switch (localeFormat) {
 		case "target_lang":
@@ -177,31 +181,19 @@ function formatOutputLocale(
 
 function estimateSourceCharacters(
 	sourceCharacters: number,
+	estimateCost: TranslationCostEstimator | undefined,
 ): TranslationEstimate {
 	const inputTokens = Math.ceil(sourceCharacters / ESTIMATED_CHARS_PER_TOKEN);
 	const outputTokens = Math.ceil(
 		inputTokens * ESTIMATED_OUTPUT_TOKEN_MULTIPLIER,
 	);
-	const totalTokens = inputTokens + outputTokens;
+	if (estimateCost !== undefined) return estimateCost(sourceCharacters);
 
-	return {
-		cost: (totalTokens / 1000) * PREVIEW_COST_PER_1000_TOKENS,
+	return unknownTranslationEstimate({
 		inputTokens,
 		outputTokens,
-		totalTokens,
-	};
-}
-
-function addEstimates(
-	first: TranslationEstimate,
-	second: TranslationEstimate,
-): TranslationEstimate {
-	return {
-		cost: first.cost + second.cost,
-		inputTokens: first.inputTokens + second.inputTokens,
-		outputTokens: first.outputTokens + second.outputTokens,
-		totalTokens: first.totalTokens + second.totalTokens,
-	};
+		unavailableReason: "Provider-specific price estimate is unavailable.",
+	});
 }
 
 function buildPrefixCharacterTotals(
@@ -218,25 +210,35 @@ function buildPrefixCharacterTotals(
 function estimatePrefix(
 	prefixCharacterTotals: readonly number[],
 	count: number,
+	estimateCost: TranslationCostEstimator | undefined,
 ): TranslationEstimate {
-	return estimateSourceCharacters(prefixCharacterTotals[count] ?? 0);
+	return estimateSourceCharacters(
+		prefixCharacterTotals[count] ?? 0,
+		estimateCost,
+	);
 }
 
 function selectStringCountWithinBudget(
 	prefixCharacterTotals: readonly number[],
 	maxCount: number,
 	remainingCost: number,
+	estimateCost: TranslationCostEstimator | undefined,
 ): number {
 	if (remainingCost <= 0) return 0;
+	if (estimateCost === undefined) return maxCount;
 
 	let low = 0;
 	let high = maxCount;
 
 	while (low < high) {
 		const middle = Math.ceil((low + high) / 2);
-		if (
-			estimatePrefix(prefixCharacterTotals, middle).cost <= remainingCost
-		) {
+		const estimate = estimatePrefix(
+			prefixCharacterTotals,
+			middle,
+			estimateCost,
+		);
+		const cost = getKnownCost(estimate);
+		if (cost !== undefined && cost <= remainingCost) {
 			low = middle;
 		} else {
 			high = middle - 1;
@@ -255,12 +257,7 @@ export function buildTranslateWorkload(
 	const prefixCharacterTotals = buildPrefixCharacterTotals(analysis.strings);
 	const languages: LanguageWorkPlan[] = [];
 	let totalBatches = 0;
-	let totalEstimate: TranslationEstimate = {
-		cost: 0,
-		inputTokens: 0,
-		outputTokens: 0,
-		totalTokens: 0,
-	};
+	let totalEstimate: TranslationEstimate = ZERO_TRANSLATION_ESTIMATE;
 	let totalPlannedStrings = 0;
 	let totalSkippedByCost = 0;
 	let totalSkippedByLimit = 0;
@@ -278,8 +275,13 @@ export function buildTranslateWorkload(
 						prefixCharacterTotals,
 						stringLimit,
 						remainingCost,
+						options.estimateCost,
 					);
-		const estimate = estimatePrefix(prefixCharacterTotals, plannedStrings);
+		const estimate = estimatePrefix(
+			prefixCharacterTotals,
+			plannedStrings,
+			options.estimateCost,
+		);
 		const batches =
 			plannedStrings === 0
 				? 0
@@ -288,9 +290,9 @@ export function buildTranslateWorkload(
 		const skippedByLimit = analysis.totalStrings - stringLimit;
 
 		remainingStrings -= plannedStrings;
-		remainingCost -= estimate.cost;
+		remainingCost -= getKnownCost(estimate) ?? 0;
 		totalBatches += batches;
-		totalEstimate = addEstimates(totalEstimate, estimate);
+		totalEstimate = addTranslationEstimates(totalEstimate, estimate);
 		totalPlannedStrings += plannedStrings;
 		totalSkippedByCost += skippedByCost;
 		totalSkippedByLimit += skippedByLimit;

@@ -274,7 +274,66 @@ describe("executeTranslate", () => {
 		}
 	});
 
-	it("does not write a batch when actual cost exceeds the cost limit", async () => {
+	it("returns ordered not-started rows for later languages after cost stop", async () => {
+		const project = await makeProject();
+
+		try {
+			const result = await executeTranslate(
+				buildOptions(project, {
+					maxCost: 0,
+					targetLanguages: ["fr_FR", "es_ES", "de_DE"],
+				}),
+				fakeTranslateBatch,
+			);
+
+			expect(result.results.map((item) => item.language)).to.deep.equal([
+				"fr_FR",
+				"es_ES",
+				"de_DE",
+			]);
+			expect(result.results[1]).to.deep.include({
+				skipReason: "cost-limit",
+				status: "skipped",
+			});
+			expect(result.results[2]).to.deep.include({
+				skipReason: "cost-limit",
+				status: "skipped",
+			});
+		} finally {
+			await project.cleanup();
+		}
+	});
+
+	it("returns ordered not-started rows for later languages after abort failure", async () => {
+		const project = await makeProject();
+
+		try {
+			const result = await executeTranslate(
+				buildOptions(project, {
+					abortOnFailure: true,
+					targetLanguages: ["fr_FR", "es_ES"],
+				}),
+				async () => ({
+					error: "failed",
+					ok: false,
+					retryable: true,
+				}),
+			);
+
+			expect(result.results.map((item) => item.language)).to.deep.equal([
+				"fr_FR",
+				"es_ES",
+			]);
+			expect(result.results[1]).to.deep.include({
+				skipReason: "abort-on-failure",
+				status: "skipped",
+			});
+		} finally {
+			await project.cleanup();
+		}
+	});
+
+	it("writes paid safe translations before stopping after actual cost exceeds the cost limit", async () => {
 		const project = await makeProject();
 		let calls = 0;
 
@@ -318,18 +377,18 @@ describe("executeTranslate", () => {
 			expect(result.status).to.equal("failed");
 			expect(calls).to.equal(2);
 			expect(result.results[0]).to.deep.include({
-				skippedByCost: 3,
-				translated: 0,
+				skippedByCost: 1,
+				translated: 2,
 			});
-			let outputExists = true;
-			try {
+			const output = po.parse(
 				await fs.readFile(
 					path.join(project.directory, "languages/fr_FR.po"),
-				);
-			} catch {
-				outputExists = false;
-			}
-			expect(outputExists).to.equal(false);
+				),
+				{ validation: false },
+			);
+			expect(output.translations[""]?.["Hello"]?.msgstr).to.deep.equal([
+				"Hello FR",
+			]);
 		} finally {
 			await project.cleanup();
 		}
@@ -451,7 +510,7 @@ describe("executeTranslate", () => {
 		}
 	});
 
-	it("reports malformed existing PO merge warnings and continues from fresh output", async () => {
+	it("fails malformed existing PO merges without overwriting output", async () => {
 		const project = await makeProject();
 		const existingPoPath = path.join(project.directory, "broken.po");
 		await fs.writeFile(existingPoPath, "\0\0");
@@ -464,10 +523,20 @@ describe("executeTranslate", () => {
 				fakeTranslateBatch,
 			);
 
-			expect(result.status).to.equal("completed");
-			expect(result.results[0]?.warning).to.include(
+			expect(result.status).to.equal("failed");
+			expect(result.results[0]?.error).to.include(
 				"Could not merge existing PO file",
 			);
+			try {
+				await fs.access(
+					path.join(project.directory, "languages/fr_FR.po"),
+				);
+				expect.fail("expected output file not to be written");
+			} catch (error) {
+				expect((error as NodeJS.ErrnoException).code).to.equal(
+					"ENOENT",
+				);
+			}
 		} finally {
 			await project.cleanup();
 		}

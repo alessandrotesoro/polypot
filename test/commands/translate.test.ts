@@ -94,6 +94,48 @@ describe("polypot translate", () => {
 		return potFile;
 	}
 
+	async function writeNonFuzzyPotFixture(): Promise<string> {
+		const tempDir = await fs.mkdtemp(
+			path.join(os.tmpdir(), "polypot-translate-pot-"),
+		);
+		tempDirs.push(tempDir);
+		const potFile = path.join(tempDir, "messages.pot");
+		await fs.writeFile(potFile, POT_FIXTURE.replace("\n#, fuzzy", ""));
+
+		return potFile;
+	}
+
+	async function writeCompletePoFixture(
+		outputFile: string,
+		language = "fr_FR",
+	): Promise<void> {
+		await fs.mkdir(path.dirname(outputFile), { recursive: true });
+		await fs.writeFile(
+			outputFile,
+			`msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\\n"
+"Language: ${language}\\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\\n"
+
+msgid "Hello"
+msgstr "Bonjour"
+
+msgid "Save changes"
+msgstr "Enregistrer les modifications"
+
+msgctxt "button"
+msgid "Post"
+msgstr "Publier"
+
+msgid "%d file"
+msgid_plural "%d files"
+msgstr[0] "%d fichier"
+msgstr[1] "%d fichiers"
+`,
+		);
+	}
+
 	it("lists all 30+ Potomatic-mirrored flags in --help", async () => {
 		const { stdout } = await runCommand(["translate", "--help"]);
 		for (const flag of EXPECTED_FLAGS) {
@@ -449,6 +491,43 @@ describe("polypot translate", () => {
 		]);
 	});
 
+	it("allows source-copy output with an unsupported provider", async () => {
+		const potFile = await writePotFixture();
+		const outputDir = await fs.mkdtemp(
+			path.join(os.tmpdir(), "polypot-translate-copy-provider-"),
+		);
+		tempDirs.push(outputDir);
+
+		const { stdout, error } = await runCommand([
+			"translate",
+			"--json",
+			"--provider",
+			"gemini",
+			"-l",
+			"en_GB",
+			"-s",
+			"en_US",
+			"-p",
+			potFile,
+			"--output-dir",
+			outputDir,
+		]);
+		const result = JSON.parse(stdout) as {
+			readonly results: readonly {
+				readonly status: string;
+				readonly translated: number;
+			}[];
+			readonly status: string;
+		};
+
+		expect(error).to.equal(undefined);
+		expect(result.status).to.equal("completed");
+		expect(result.results[0]).to.deep.include({
+			status: "completed",
+			translated: 4,
+		});
+	});
+
 	it("blocks provider translation without an API key", async () => {
 		const potFile = await writePotFixture();
 		const previousApiKey = process.env["POLYPOT_API_KEY"];
@@ -488,7 +567,7 @@ describe("polypot translate", () => {
 		});
 	});
 
-	it("blocks unsupported translate providers", async () => {
+	it("allows unsupported provider dry-run when no provider cost gate is requested", async () => {
 		const potFile = await writePotFixture();
 		const { stdout, error } = await runCommand([
 			"translate",
@@ -502,6 +581,62 @@ describe("polypot translate", () => {
 			"--dry-run",
 		]);
 		const result = JSON.parse(stdout) as {
+			readonly results: readonly {
+				readonly estimate: {
+					readonly costKnown: boolean;
+				};
+				readonly status: string;
+			}[];
+			readonly status: string;
+		};
+
+		expect(error).to.equal(undefined);
+		expect(result.status).to.equal("dry-run");
+		expect(result.results[0]?.status).to.equal("dry-run");
+		expect(result.results[0]?.estimate.costKnown).to.equal(false);
+	});
+
+	it("blocks unsupported provider dry-run when max cost requires an estimator", async () => {
+		const potFile = await writePotFixture();
+		const { stdout, error } = await runCommand([
+			"translate",
+			"--json",
+			"--provider",
+			"gemini",
+			"-l",
+			"fr_FR",
+			"-p",
+			potFile,
+			"--dry-run",
+			"--max-cost",
+			"0.01",
+		]);
+		const result = JSON.parse(stdout) as {
+			readonly error: {
+				readonly code: string;
+			};
+			readonly status: string;
+		};
+
+		expect(error).to.equal(undefined);
+		expect(process.exitCode).to.equal(1);
+		expect(result.status).to.equal("blocked");
+		expect(result.error.code).to.equal("cost_estimator_unavailable");
+	});
+
+	it("blocks unsupported live providers only when provider work is planned", async () => {
+		const potFile = await writePotFixture();
+		const { stdout, error } = await runCommand([
+			"translate",
+			"--json",
+			"--provider",
+			"gemini",
+			"-l",
+			"fr_FR",
+			"-p",
+			potFile,
+		]);
+		const result = JSON.parse(stdout) as {
 			readonly error: {
 				readonly code: string;
 			};
@@ -512,6 +647,44 @@ describe("polypot translate", () => {
 		expect(process.exitCode).to.equal(1);
 		expect(result.status).to.equal("blocked");
 		expect(result.error.code).to.equal("unsupported_provider");
+	});
+
+	it("allows unsupported live providers when existing output leaves no translation work", async () => {
+		const potFile = await writeNonFuzzyPotFixture();
+		const outputDir = await fs.mkdtemp(
+			path.join(os.tmpdir(), "polypot-translate-merged-provider-"),
+		);
+		tempDirs.push(outputDir);
+		await writeCompletePoFixture(path.join(outputDir, "fr_FR.po"));
+
+		const { stdout, error } = await runCommand([
+			"translate",
+			"--json",
+			"--provider",
+			"gemini",
+			"-l",
+			"fr_FR",
+			"-p",
+			potFile,
+			"--output-dir",
+			outputDir,
+		]);
+		const result = JSON.parse(stdout) as {
+			readonly results: readonly {
+				readonly skippedByExisting: number;
+				readonly status: string;
+				readonly translated: number;
+			}[];
+			readonly status: string;
+		};
+
+		expect(error).to.equal(undefined);
+		expect(result.status).to.equal("completed");
+		expect(result.results[0]).to.deep.include({
+			skippedByExisting: 4,
+			status: "skipped",
+			translated: 0,
+		});
 	});
 
 	it("writes --output-file before writing debug output", async () => {
@@ -648,7 +821,7 @@ describe("polypot translate", () => {
 			"translate",
 			"--json",
 			"-l",
-			"fr_FR,es_ES",
+			"fr_FR",
 			"-p",
 			potFile,
 			"--input-po-path",
@@ -743,10 +916,7 @@ describe("polypot translate", () => {
 			inputPoPath: "base.po",
 			potFilePath: potFile,
 		});
-		expect(settings.source.targetLanguages).to.deep.equal([
-			"fr_FR",
-			"es_ES",
-		]);
+		expect(settings.source.targetLanguages).to.deep.equal(["fr_FR"]);
 		expect(settings.output).to.deep.include({
 			localeFormat: "wp_locale",
 			outputDir: "languages",
@@ -849,6 +1019,118 @@ describe("polypot translate", () => {
 		expect(result.status).to.equal("blocked");
 		expect(result.error.code).to.equal("duplicate_output_file");
 		expect(process.exitCode).to.equal(1);
+	});
+
+	it("blocks JSON output paths that collide with planned PO output", async () => {
+		const potFile = await writePotFixture();
+		const outputDir = await fs.mkdtemp(
+			path.join(os.tmpdir(), "polypot-translate-collision-"),
+		);
+		tempDirs.push(outputDir);
+		const outputFile = path.join(outputDir, "fr_FR.po");
+		const { stdout, error } = await runCommand([
+			"translate",
+			"--json",
+			"-l",
+			"fr_FR",
+			"-p",
+			potFile,
+			"--output-dir",
+			outputDir,
+			"--output-format",
+			"json",
+			"--output-file",
+			outputFile,
+			"--dry-run",
+		]);
+		const result = JSON.parse(stdout) as {
+			readonly error: {
+				readonly code: string;
+				readonly collisions: readonly {
+					readonly path: string;
+					readonly reservations: readonly string[];
+				}[];
+				readonly suppressOutputFile: boolean;
+			};
+			readonly status: string;
+		};
+
+		expect(error).to.equal(undefined);
+		expect(process.exitCode).to.equal(1);
+		expect(result.status).to.equal("blocked");
+		expect(result.error.code).to.equal("output_path_collision");
+		expect(result.error.suppressOutputFile).to.equal(true);
+		expect(result.error.collisions[0]?.reservations).to.have.members([
+			"po:fr_FR",
+			"json_output",
+		]);
+		try {
+			await fs.access(outputFile);
+			expect.fail("expected colliding output file not to be written");
+		} catch (accessError) {
+			expect((accessError as NodeJS.ErrnoException).code).to.equal(
+				"ENOENT",
+			);
+		}
+	});
+
+	it("blocks JSON output paths that collide with the input POT file", async () => {
+		const potFile = await writePotFixture();
+		const before = await fs.readFile(potFile, "utf8");
+		const { stdout, error } = await runCommand([
+			"translate",
+			"--json",
+			"-l",
+			"fr_FR",
+			"-p",
+			potFile,
+			"--output-format",
+			"json",
+			"--output-file",
+			potFile,
+			"--dry-run",
+		]);
+		const result = JSON.parse(stdout) as {
+			readonly error: {
+				readonly code: string;
+				readonly suppressOutputFile: boolean;
+			};
+			readonly status: string;
+		};
+
+		expect(error).to.equal(undefined);
+		expect(process.exitCode).to.equal(1);
+		expect(result.status).to.equal("blocked");
+		expect(result.error.code).to.equal("output_path_collision");
+		expect(result.error.suppressOutputFile).to.equal(true);
+		expect(await fs.readFile(potFile, "utf8")).to.equal(before);
+	});
+
+	it("blocks a singular input PO path across multiple target languages", async () => {
+		const potFile = await writePotFixture();
+		const inputPoPath = path.join(path.dirname(potFile), "base.po");
+		const { stdout, error } = await runCommand([
+			"translate",
+			"--json",
+			"-l",
+			"fr_FR,es_ES",
+			"-p",
+			potFile,
+			"--input-po-path",
+			inputPoPath,
+			"--dry-run",
+		]);
+		const result = JSON.parse(stdout) as {
+			readonly error: {
+				readonly code: string;
+			};
+			readonly status: string;
+		};
+
+		expect(error).to.equal(undefined);
+		expect(process.exitCode).to.equal(1);
+		expect(result.status).to.equal("blocked");
+		expect(result.error.code).to.equal("input_po_path_ambiguous");
 	});
 
 	it("applies the global string limit to the preview plan", async () => {

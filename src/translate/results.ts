@@ -18,6 +18,8 @@ export type TranslationLanguageStatus =
 export interface TranslationLanguageResult {
 	readonly batches: number;
 	readonly cost: OpenAICost;
+	readonly costKnown?: boolean;
+	readonly costUnavailableReason?: string;
 	readonly debug?: readonly TranslationBatchDebug[];
 	readonly failed: number;
 	readonly language: string;
@@ -27,6 +29,7 @@ export interface TranslationLanguageResult {
 	readonly skippedByExisting: number;
 	readonly skippedByCost: number;
 	readonly skippedByLimit: number;
+	readonly skipReason?: "abort-on-failure" | "cost-limit";
 	readonly sourceStrings: number;
 	readonly status: TranslationLanguageStatus;
 	readonly translated: number;

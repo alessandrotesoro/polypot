@@ -2,6 +2,7 @@ import { Command, type Interfaces } from "@oclif/core";
 import {
 	type LoadPolypotConfigOptions,
 	loadPolypotRuntimeConfig,
+	type PolypotRuntimeConfigSources,
 } from "./config/loader.js";
 import type { PolypotConfig } from "./config/schema.js";
 import type { PolypotSecrets } from "./config/secrets.js";
@@ -44,6 +45,7 @@ export abstract class BaseCommand<T extends typeof Command> extends Command {
 	protected flags!: BaseFlags<T>;
 	protected args!: BaseArgs<T>;
 	protected appConfig!: PolypotConfig;
+	protected appConfigSources!: PolypotRuntimeConfigSources;
 	protected runtimeSecrets!: PolypotSecrets;
 
 	/**
@@ -67,6 +69,7 @@ export abstract class BaseCommand<T extends typeof Command> extends Command {
 			options: extractDiscoveryOptions(flags as ConfigDiscoveryFlags),
 		});
 		this.appConfig = runtimeConfig.config;
+		this.appConfigSources = runtimeConfig.sources;
 		this.runtimeSecrets = runtimeConfig.secrets;
 	}
 }

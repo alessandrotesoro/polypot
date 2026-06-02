@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { Flags } from "@oclif/core";
 import { BaseCommand } from "../base-command.js";
+import type { ConfigPathKey } from "../config/loader.js";
 import { DEFAULT_OPENAI_MODEL } from "../config/schema.js";
 import { createPolypotSecrets } from "../config/secrets.js";
 import { polypotEnv } from "../flag-helpers.js";
@@ -10,6 +11,7 @@ import {
 	LANGUAGE_VALUE_ERROR,
 } from "../language-values.js";
 import { sanitizeTerminalText } from "../terminal.js";
+import { buildTranslateExecutionPlan } from "../translate/execution-plan.js";
 import {
 	runTranslateUiPreview,
 	type TranslateSettingsSnapshot,
@@ -274,22 +276,20 @@ each target language.
 		}),
 	};
 
-	/**
-	 * Run the translate command.
-	 *
-	 * @returns A promise for the result.
-	 */
 	public async run(): Promise<unknown> {
 		const outputFormat =
 			this.flags["output-format"] ?? this.appConfig.output.outputFormat;
 		const outputFile = this.resolveConfigSourcedPath(
+			"output.outputFile",
 			this.flags["output-file"] ?? this.appConfig.output.outputFile,
 			this.flags["output-file"] !== undefined,
 		);
 		const outputDir = this.resolveRequiredConfigSourcedPath(
+			"output.outputDir",
 			this.flags["output-dir"] ?? this.appConfig.output.outputDir,
 			this.flags["output-dir"] !== undefined,
 		);
+		const debugOutputFile = this.getDebugOutputFileIfRequested();
 		const localeFormat =
 			this.flags["locale-format"] ?? this.appConfig.output.localeFormat;
 		const usesJsonStdout =
@@ -356,8 +356,9 @@ each target language.
 			...(outputFile !== undefined && { outputFile }),
 			...(poFilePrefix !== undefined && { poFilePrefix }),
 			...(potFilePath !== undefined && { potFilePath }),
+			...(debugOutputFile !== undefined && { debugOutputFile }),
 		});
-		const result = await runTranslateUiPreview({
+		const inputPlan = {
 			config: {
 				forceTranslate:
 					this.flags["force-translate"] ??
@@ -388,20 +389,24 @@ each target language.
 					this.appConfig.source.sourceLanguage,
 				verboseLevel,
 			},
-		});
-
-		const debugOutputFile = this.getDebugOutputFileIfRequested();
+		};
+		const planResult = await buildTranslateExecutionPlan(inputPlan);
+		const result = await runTranslateUiPreview(planResult);
+		const shouldWriteDebug =
+			debugOutputFile !== undefined && result.status !== "blocked";
 		const publicResult = stripTranslateDebug(result);
-		const finalResult =
-			debugOutputFile === undefined
-				? publicResult
-				: { ...publicResult, debugOutputFile };
+		const finalResult = !shouldWriteDebug
+			? publicResult
+			: { ...publicResult, debugOutputFile };
 
-		if (outputFile !== undefined) {
+		if (
+			outputFile !== undefined &&
+			result.error?.suppressOutputFile !== true
+		) {
 			await this.writeJsonOutput(outputFile, finalResult);
 		}
 
-		if (debugOutputFile !== undefined) {
+		if (shouldWriteDebug) {
 			await this.writeJsonOutput(debugOutputFile, result);
 		}
 
@@ -448,6 +453,7 @@ each target language.
 		readonly outputFormat: string;
 		readonly poFilePrefix?: string;
 		readonly potFilePath?: string;
+		readonly debugOutputFile?: string;
 		readonly retryDelay: number;
 		readonly timeout: number;
 	}): TranslateSettingsSnapshot {
@@ -457,23 +463,35 @@ each target language.
 			this.flags["max-tokens"] ?? this.appConfig.provider.maxTokens;
 		return {
 			behavior: {
-				dictionaryPath:
+				dictionaryPath: this.resolveRequiredConfigSourcedPath(
+					"behavior.dictionaryPath",
 					this.flags["dictionary-path"] ??
-					this.appConfig.behavior.dictionaryPath,
+						this.appConfig.behavior.dictionaryPath,
+					this.flags["dictionary-path"] !== undefined,
+				),
 				forceTranslate:
 					this.flags["force-translate"] ??
 					this.appConfig.behavior.forceTranslate,
-				poHeaderTemplatePath:
+				poHeaderTemplatePath: this.resolveRequiredConfigSourcedPath(
+					"behavior.poHeaderTemplatePath",
 					this.flags["po-header-template-path"] ??
-					this.appConfig.behavior.poHeaderTemplatePath,
-				promptFilePath:
+						this.appConfig.behavior.poHeaderTemplatePath,
+					this.flags["po-header-template-path"] !== undefined,
+				),
+				promptFilePath: this.resolveRequiredConfigSourcedPath(
+					"behavior.promptFilePath",
 					this.flags["prompt-file-path"] ??
-					this.appConfig.behavior.promptFilePath,
+						this.appConfig.behavior.promptFilePath,
+					this.flags["prompt-file-path"] !== undefined,
+				),
 				useDictionary:
 					this.flags["use-dictionary"] ??
 					this.appConfig.behavior.useDictionary,
 			},
 			debug: {
+				...(resolved.debugOutputFile !== undefined && {
+					debugOutputFile: resolved.debugOutputFile,
+				}),
 				dryRun: this.flags["dry-run"] ?? this.appConfig.debug.dryRun,
 				saveDebugInfo:
 					this.flags["save-debug-info"] ??
@@ -529,7 +547,13 @@ each target language.
 					this.appConfig.retries.skipLanguageOnFailure,
 			},
 			source: {
-				...(inputPoPath !== undefined && { inputPoPath }),
+				...(inputPoPath !== undefined && {
+					inputPoPath: this.resolveRequiredConfigSourcedPath(
+						"source.inputPoPath",
+						inputPoPath,
+						this.flags["input-po-path"] !== undefined,
+					),
+				}),
 				...(resolved.potFilePath !== undefined && {
 					potFilePath: resolved.potFilePath,
 				}),
@@ -610,45 +634,31 @@ each target language.
 		if (this.flags["pot-file-path"] !== undefined)
 			return this.flags["pot-file-path"];
 
-		const configuredPath = this.appConfig.source.potFilePath;
-		if (configuredPath === undefined) return undefined;
-		if (
-			this.flags.config === undefined ||
-			path.isAbsolute(configuredPath)
-		) {
-			return configuredPath;
-		}
-
-		return path.join(
-			getExplicitConfigProjectDirectory(this.flags.config),
-			configuredPath,
+		return this.resolveConfigSourcedPath(
+			"source.potFilePath",
+			this.appConfig.source.potFilePath,
+			false,
 		);
 	}
 
 	private resolveConfigSourcedPath(
+		key: ConfigPathKey,
 		value: string | undefined,
 		flagProvided: boolean,
 	): string | undefined {
 		if (value === undefined) return undefined;
-		if (
-			flagProvided ||
-			this.flags.config === undefined ||
-			path.isAbsolute(value)
-		) {
-			return value;
-		}
+		if (flagProvided || path.isAbsolute(value)) return value;
 
-		return path.join(
-			getExplicitConfigProjectDirectory(this.flags.config),
-			value,
-		);
+		const source = this.appConfigSources.paths[key];
+		return source === undefined ? value : path.join(source.rootDir, value);
 	}
 
 	private resolveRequiredConfigSourcedPath(
+		key: ConfigPathKey,
 		value: string,
 		flagProvided: boolean,
 	): string {
-		return this.resolveConfigSourcedPath(value, flagProvided) ?? value;
+		return this.resolveConfigSourcedPath(key, value, flagProvided) ?? value;
 	}
 
 	private validatePoFilePrefix(value: string | undefined): void {

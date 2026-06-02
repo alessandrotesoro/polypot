@@ -1,4 +1,5 @@
-import { entryNeedsTranslation, type PotEntry } from "./pot.js";
+import { entryNeedsTranslation } from "./completeness.js";
+import type { PotEntry } from "./pot.js";
 
 export interface TranslationBatch {
 	readonly entries: readonly PotEntry[];
@@ -35,7 +36,7 @@ function selectEntries(
 	const eligible =
 		options.forceTranslate === true
 			? entries
-			: entries.filter(entryNeedsTranslation);
+			: entries.filter((entry) => entryNeedsTranslation(entry));
 	const limit = options.maxStrings ?? eligible.length;
 	const selected = eligible.slice(0, limit);
 

@@ -4,6 +4,7 @@ import {
 	type GetTextTranslations,
 	po,
 } from "gettext-parser";
+import { entryNeedsTranslation as needsTranslation } from "./completeness.js";
 
 const DEFAULT_CONTEXT = "";
 
@@ -155,12 +156,7 @@ function buildAnalysis(
 }
 
 export function entryNeedsTranslation(entry: PotEntry): boolean {
-	if (entry.msgstr.length === 0) return true;
-
-	return entry.msgstr.every((value) => {
-		const trimmed = value.trim();
-		return trimmed.length === 0 || trimmed.startsWith("[DRY RUN]");
-	});
+	return needsTranslation(entry);
 }
 
 export function getTranslatableEntries(

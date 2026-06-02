@@ -54,7 +54,9 @@ describe("translation validation", () => {
 		});
 
 		expect(result.msgstr).to.deep.equal([""]);
-		expect(result.issues[0]?.reason).to.equal("placeholder_mismatch");
+		expect(result.issues[0]?.reason).to.equal(
+			"printf_placeholder_mismatch",
+		);
 	});
 
 	it("allows reordered positional placeholders", () => {
@@ -76,7 +78,9 @@ describe("translation validation", () => {
 		});
 
 		expect(result.msgstr).to.deep.equal([""]);
-		expect(result.issues[0]?.reason).to.equal("placeholder_mismatch");
+		expect(result.issues[0]?.reason).to.equal(
+			"printf_placeholder_mismatch",
+		);
 	});
 
 	it("allows numeric placeholders to be dropped in accepted small-count plural forms", () => {
@@ -109,5 +113,44 @@ describe("translation validation", () => {
 
 		expect(result.msgstr).to.deep.equal(["%d fichier", ""]);
 		expect(result.issues[0]?.reason).to.equal("plural_form_count");
+	});
+
+	it("rejects translations that drop protected HTML tags", () => {
+		const result = validateEntryTranslation({
+			entry: entry("Click <strong>%s</strong>"),
+			msgstr: ["Cliquez %s"],
+			pluralCount: 2,
+		});
+
+		expect(result.msgstr).to.deep.equal([""]);
+		expect(result.issues.map((issue) => issue.reason)).to.include(
+			"tag_mismatch",
+		);
+	});
+
+	it("rejects translations that drop bracket shortcode tokens", () => {
+		const result = validateEntryTranslation({
+			entry: entry("[link]View[/link] [count]"),
+			msgstr: ["Voir"],
+			pluralCount: 2,
+		});
+
+		expect(result.msgstr).to.deep.equal([""]);
+		expect(result.issues.map((issue) => issue.reason)).to.include(
+			"shortcode_mismatch",
+		);
+	});
+
+	it("keeps translations that preserve protected tags and shortcodes", () => {
+		const result = validateEntryTranslation({
+			entry: entry("Click <strong>%s</strong> [link]"),
+			msgstr: ["Cliquez <strong>%s</strong> [link]"],
+			pluralCount: 2,
+		});
+
+		expect(result.msgstr).to.deep.equal([
+			"Cliquez <strong>%s</strong> [link]",
+		]);
+		expect(result.issues).to.deep.equal([]);
 	});
 });
