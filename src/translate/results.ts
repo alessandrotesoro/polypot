@@ -15,6 +15,18 @@ export type TranslationLanguageStatus =
 	| "failed"
 	| "skipped";
 
+export type TranslationLanguageState =
+	| "completed"
+	| "cost_skipped"
+	| "dry_run"
+	| "execution_failed"
+	| "merge_failed"
+	| "no_work"
+	| "not_started"
+	| "partial_success"
+	| "provider_failed"
+	| "validation_failed";
+
 export interface TranslationLanguageResult {
 	readonly batches: number;
 	readonly cost: OpenAICost;
@@ -31,6 +43,7 @@ export interface TranslationLanguageResult {
 	readonly skippedByLimit: number;
 	readonly skipReason?: "abort-on-failure" | "cost-limit";
 	readonly sourceStrings: number;
+	readonly state: TranslationLanguageState;
 	readonly status: TranslationLanguageStatus;
 	readonly translated: number;
 	readonly validation: TranslationValidationStats;

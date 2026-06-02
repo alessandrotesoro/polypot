@@ -138,6 +138,7 @@ describe("executeTranslate", () => {
 				failed: 0,
 				language: "fr_FR",
 				plannedStrings: 3,
+				state: "completed",
 				status: "completed",
 				translated: 3,
 			});
@@ -166,6 +167,7 @@ describe("executeTranslate", () => {
 
 			expect(result.status).to.equal("dry-run");
 			expect(result.results[0]?.status).to.equal("dry-run");
+			expect(result.results[0]?.state).to.equal("dry_run");
 			try {
 				await fs.access(
 					path.join(project.directory, "languages/fr_FR.po"),
@@ -226,6 +228,7 @@ describe("executeTranslate", () => {
 			expect(result.status).to.equal("failed");
 			expect(result.results[0]).to.deep.include({
 				failed: 3,
+				state: "provider_failed",
 				status: "failed",
 				translated: 0,
 			});
@@ -266,6 +269,7 @@ describe("executeTranslate", () => {
 			expect(calls).to.equal(1);
 			expect(result.results[0]).to.deep.include({
 				skippedByCost: 3,
+				state: "cost_skipped",
 				translated: 0,
 			});
 			expect(result.totals.skippedByCost).to.equal(3);
@@ -293,10 +297,12 @@ describe("executeTranslate", () => {
 			]);
 			expect(result.results[1]).to.deep.include({
 				skipReason: "cost-limit",
+				state: "not_started",
 				status: "skipped",
 			});
 			expect(result.results[2]).to.deep.include({
 				skipReason: "cost-limit",
+				state: "not_started",
 				status: "skipped",
 			});
 		} finally {
@@ -326,6 +332,7 @@ describe("executeTranslate", () => {
 			]);
 			expect(result.results[1]).to.deep.include({
 				skipReason: "abort-on-failure",
+				state: "not_started",
 				status: "skipped",
 			});
 		} finally {
@@ -378,6 +385,7 @@ describe("executeTranslate", () => {
 			expect(calls).to.equal(2);
 			expect(result.results[0]).to.deep.include({
 				skippedByCost: 1,
+				state: "cost_skipped",
 				translated: 2,
 			});
 			const output = po.parse(
@@ -435,6 +443,7 @@ describe("executeTranslate", () => {
 			expect(result.status).to.equal("failed");
 			expect(result.results[0]).to.deep.include({
 				failed: 2,
+				state: "validation_failed",
 				translated: 1,
 			});
 			expect(output.translations[""]?.["Hello"]?.msgstr).to.deep.equal([
@@ -524,6 +533,7 @@ describe("executeTranslate", () => {
 			);
 
 			expect(result.status).to.equal("failed");
+			expect(result.results[0]?.state).to.equal("merge_failed");
 			expect(result.results[0]?.error).to.include(
 				"Could not merge existing PO file",
 			);

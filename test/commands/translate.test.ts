@@ -468,6 +468,7 @@ msgstr[1] "%d fichiers"
 		const result = JSON.parse(stdout) as {
 			readonly results: readonly {
 				readonly outputFile: string;
+				readonly state: string;
 				readonly status: string;
 				readonly translated: number;
 			}[];
@@ -482,6 +483,7 @@ msgstr[1] "%d fichiers"
 		expect(result.status).to.equal("completed");
 		expect(result.results[0]).to.deep.include({
 			outputFile,
+			state: "completed",
 			status: "completed",
 			translated: 4,
 		});

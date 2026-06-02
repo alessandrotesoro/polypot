@@ -1,11 +1,17 @@
 import type { PolypotSecrets } from "../config/secrets.js";
-import type { OpenAICost } from "../providers/openai/pricing.js";
 import {
 	type OpenAIClientFactory,
 	type OpenAITranslateBatchResult,
 	translateOpenAIBatch,
 } from "../providers/openai/translate.js";
 import { buildTranslationBatchPlan, type TranslationBatch } from "./batches.js";
+import {
+	createTranslationBudgetLedger,
+	hasExceededBudget,
+	recordActualCost,
+	type TranslationBudgetLedger,
+	wouldExceedBudget,
+} from "./budget.js";
 import { addOpenAICosts, ZERO_OPENAI_COST } from "./cost.js";
 import {
 	createDictionaryMatcher,
@@ -32,6 +38,7 @@ import { loadPromptTemplate } from "./prompts.js";
 import type {
 	TranslationBatchDebug,
 	TranslationLanguageResult,
+	TranslationLanguageState,
 	TranslationLanguageStatus,
 	TranslationRunResult,
 	TranslationRunStatus,
@@ -214,6 +221,7 @@ function buildFailedLanguageResult(options: {
 		skippedByCost: 0,
 		skippedByLimit: 0,
 		sourceStrings: 0,
+		state: "execution_failed",
 		status: "failed",
 		translated: 0,
 		validation: createEmptyValidationStats(),
@@ -242,6 +250,7 @@ function buildNotStartedLanguageResult(options: {
 		skippedByCost,
 		skippedByLimit: 0,
 		sourceStrings: options.document.entries.length,
+		state: "not_started",
 		status: "skipped",
 		translated: 0,
 		validation: createEmptyValidationStats(),
@@ -261,6 +270,28 @@ function getValidationIssueCount(stats: TranslationValidationStats): number {
 
 function getInvalidEntryKeys(stats: TranslationValidationStats): Set<string> {
 	return new Set(stats.blankedStrings.map((issue) => issue.entryKey));
+}
+
+function getLanguageState(options: {
+	readonly dryRun: boolean;
+	readonly failed: number;
+	readonly skippedByCost: number;
+	readonly status: TranslationLanguageStatus;
+	readonly translated: number;
+	readonly validation: TranslationValidationStats;
+}): TranslationLanguageState {
+	if (options.status === "skipped") return "no_work";
+	if (options.dryRun) return "dry_run";
+	if (options.skippedByCost > 0) return "cost_skipped";
+	if (getValidationIssueCount(options.validation) > 0) {
+		return "validation_failed";
+	}
+	if (options.failed > 0 && options.translated > 0) {
+		return "partial_success";
+	}
+	if (options.failed > 0) return "provider_failed";
+
+	return "completed";
 }
 
 function getBatchDebug(options: {
@@ -295,19 +326,6 @@ function pushBatchDebug(options: {
 		targetLanguage: options.targetLanguage,
 	});
 	if (batchDebug !== undefined) options.debug.push(batchDebug);
-}
-
-function shouldSkipBatchForCost(options: {
-	readonly batchCost: OpenAICost;
-	readonly currentCost: OpenAICost;
-	readonly maxCost?: number | undefined;
-}): boolean {
-	if (options.maxCost === undefined) return false;
-
-	return (
-		options.currentCost.totalCost + options.batchCost.totalCost >
-		options.maxCost
-	);
 }
 
 function countBatchEntriesFrom(
@@ -447,11 +465,11 @@ async function processProviderBatch(options: {
 
 async function processLanguage(options: {
 	readonly document: PotDocument;
+	readonly budgetLedger?: TranslationBudgetLedger;
 	readonly executeOptions: ExecuteTranslateOptions;
 	readonly language: string;
 	readonly mergeSource: ExistingPoMergeSource;
 	readonly maxStrings?: number;
-	readonly spentCost?: OpenAICost;
 	readonly translateBatch: TranslateBatchFunction;
 }): Promise<TranslationLanguageResult> {
 	const outputFile = buildOutputFile(
@@ -499,6 +517,7 @@ async function processLanguage(options: {
 				skippedByCost: 0,
 				skippedByLimit: 0,
 				sourceStrings: options.document.entries.length,
+				state: "merge_failed",
 				status: "failed",
 				translated: 0,
 				validation: createEmptyValidationStats(),
@@ -552,6 +571,7 @@ async function processLanguage(options: {
 			skippedByCost: 0,
 			skippedByLimit: batchPlan.skippedByLimit,
 			sourceStrings: batchPlan.sourceStrings,
+			state: "no_work",
 			status: "skipped",
 			translated: 0,
 			validation,
@@ -629,13 +649,14 @@ async function processLanguage(options: {
 				}
 				continue;
 			}
-			if (
-				shouldSkipBatchForCost({
-					batchCost: estimated.cost,
-					currentCost: addCosts(options.spentCost ?? ZERO_COST, cost),
-					maxCost: options.executeOptions.maxCost,
-				})
-			) {
+			const currentBudget = recordActualCost(
+				options.budgetLedger ??
+					createTranslationBudgetLedger(
+						options.executeOptions.maxCost,
+					),
+				cost,
+			);
+			if (wouldExceedBudget(currentBudget, estimated.cost)) {
 				const skippedStrings = countBatchEntriesFrom(
 					batchPlan.batches,
 					batch.number,
@@ -738,11 +759,15 @@ async function processLanguage(options: {
 					invalidEntryKeys.size;
 			if (
 				!options.executeOptions.dryRun &&
-				shouldSkipBatchForCost({
-					batchCost: ZERO_COST,
-					currentCost: addCosts(options.spentCost ?? ZERO_COST, cost),
-					maxCost: options.executeOptions.maxCost,
-				})
+				hasExceededBudget(
+					recordActualCost(
+						options.budgetLedger ??
+							createTranslationBudgetLedger(
+								options.executeOptions.maxCost,
+							),
+						cost,
+					),
+				)
 			) {
 				const skippedStrings = countBatchEntriesAfter(
 					batchPlan.batches,
@@ -803,6 +828,14 @@ async function processLanguage(options: {
 		skippedByCost,
 		skippedByLimit: batchPlan.skippedByLimit,
 		sourceStrings: batchPlan.sourceStrings,
+		state: getLanguageState({
+			dryRun: options.executeOptions.dryRun,
+			failed,
+			skippedByCost,
+			status,
+			translated,
+			validation,
+		}),
 		status,
 		translated,
 		validation,
@@ -976,7 +1009,9 @@ async function processLanguagesSequentially(options: {
 	let remainingStrings =
 		options.executeOptions.maxTotalStrings ?? Number.POSITIVE_INFINITY;
 	const results: TranslationLanguageResult[] = [];
-	let totalCost = ZERO_COST;
+	let budgetLedger = createTranslationBudgetLedger(
+		options.executeOptions.maxCost,
+	);
 
 	for (
 		let languageIndex = 0;
@@ -994,13 +1029,13 @@ async function processLanguagesSequentially(options: {
 			options.executeOptions.maxStringsPerJob ?? Number.POSITIVE_INFINITY,
 		);
 		const result = await processLanguage({
+			budgetLedger,
 			document: options.document,
 			executeOptions: options.executeOptions,
 			language,
 			mergeSource: options.mergeSources.get(language) ?? {
 				kind: "none",
 			},
-			spentCost: totalCost,
 			translateBatch: options.translateBatch,
 			...(Number.isFinite(maxStrings) && {
 				maxStrings: Math.trunc(maxStrings),
@@ -1013,7 +1048,7 @@ async function processLanguagesSequentially(options: {
 			}),
 		);
 		results.push(result);
-		totalCost = addCosts(totalCost, result.cost);
+		budgetLedger = recordActualCost(budgetLedger, result.cost);
 		remainingStrings -= result.plannedStrings;
 
 		const stopReason =

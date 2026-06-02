@@ -2,7 +2,7 @@
 
 AI-powered translation CLI for `.pot` files. A from-scratch reimagining of [Potomatic](https://github.com/GravityKit/Potomatic) built on [OCLIF](https://oclif.io).
 
-> **Status:** early CLI release. `polypot setup` writes global OpenAI connection defaults, `polypot init` writes project configuration, and `translate` is still scaffolded with no translation work yet.
+> **Status:** early CLI release. `polypot setup` writes global OpenAI connection defaults, `polypot init` writes project configuration, and `polypot translate` reads POT files, merges reusable PO translations, and writes target PO files.
 
 ## Install
 
@@ -22,9 +22,17 @@ npm run build
 # Initialise per-project config in the current directory
 ./bin/run.js init
 
-# Translate a .pot file (currently scaffolded)
+# Translate a .pot file
 ./bin/run.js translate -l fr_FR,es_ES -p translations.pot
 ```
+
+## Translate behavior
+
+`polypot translate` reads source strings from a `.pot` file and writes one `.po` file per target language. Existing output files are reused by default: complete, non-fuzzy translations are merged before new work is planned, while incomplete plural forms, fuzzy entries, and dry-run placeholders are translated again. Use `--force-translate` to ignore existing translations.
+
+The command performs a preflight plan before writing files. It blocks duplicate output paths, write collisions with JSON or debug output, writes that would overwrite the input POT or input PO file, unsupported live providers that would need model work, and dry-run cost limits for providers without a cost estimator. Same-base-language targets, such as `en_US` to `en_GB`, copy source strings without calling a provider.
+
+Cost limits are enforced from planned estimates before each live batch and from actual provider usage after each paid batch. If a paid batch returns usable translations but exceeds the limit, Polypot keeps the safe translations already written and stops remaining work with explicit cost-skipped result state in JSON output.
 
 ## Configuration
 

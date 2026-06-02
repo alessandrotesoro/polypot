@@ -61,6 +61,7 @@ export interface LanguagePreviewResult {
 	readonly skippedByCost: number;
 	readonly skippedByLimit: number;
 	readonly sourceStrings: number;
+	readonly state?: TranslationLanguageResult["state"];
 	readonly status?: string;
 	readonly strings: number;
 	readonly translated: number;
@@ -457,6 +458,7 @@ function toUiLanguageResult(
 		skippedByCost: language.skippedByCost,
 		skippedByLimit: language.skippedByLimit,
 		sourceStrings: language.sourceStrings,
+		state: language.state,
 		status: language.status,
 		strings: language.plannedStrings,
 		translated: language.translated,
