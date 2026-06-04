@@ -30,9 +30,11 @@ npm run build
 
 `polypot translate` reads source strings from a `.pot` file and writes one `.po` file per target language. Existing output files are reused by default: complete, non-fuzzy translations are merged before new work is planned, while incomplete plural forms, fuzzy entries, and dry-run placeholders are translated again. Use `--force-translate` to ignore existing translations.
 
-The command performs a preflight plan before writing files. It blocks duplicate output paths, write collisions with JSON or debug output, writes that would overwrite the input POT or input PO file, unsupported live providers that would need model work, and dry-run cost limits for providers without a cost estimator. Same-base-language targets, such as `en_US` to `en_GB`, copy source strings without calling a provider.
+The command performs a preflight plan before writing files. It blocks duplicate output paths, write collisions with JSON or debug output, writes that would overwrite the input POT or input PO file, and unsupported live providers that would need model work. Same-base-language targets, such as `en_US` to `en_GB`, copy source strings without calling a provider.
 
-Cost limits are enforced from planned estimates before each live batch and from actual provider usage after each paid batch. If a paid batch returns usable translations but exceeds the limit, Polypot keeps the safe translations already written and stops remaining work with explicit cost-skipped result state in JSON output.
+Language inputs are normalized before planning, so common names and aliases such as `French`, `fr`, and `fra` resolve to canonical locale values like `fr_FR`.
+
+Generated PO files preserve non-dynamic source headers and always write target-specific `Language`, `PO-Revision-Date`, and `Plural-Forms` headers. Polypot does not load custom PO header templates.
 
 ## Configuration
 
@@ -46,9 +48,10 @@ Cost limits are enforced from planned estimates before each live batch and from 
 `polypot init` writes project-level config in the current project:
 
 - `.polypot/config.yaml` for commit-ready project defaults.
+- `.polypot/prompt.md` for the project translation prompt referenced by `behavior.promptFilePath`.
 - `.polypot/.env` for project-local `OPENAI_API_KEY`.
 
-Project YAML overrides global YAML at runtime. Project `.env` overrides the global `.env`, and `.polypot/.env` is added to `.gitignore` by default.
+Project YAML overrides global YAML at runtime. Project `.env` overrides the global `.env`, and `.polypot/.env` is added to `.gitignore` by default. Adjust the translation prompt by editing the project prompt file or changing `behavior.promptFilePath` in YAML.
 
 ## Commands
 
@@ -148,21 +151,17 @@ USAGE
     [--max-tokens <value>] [-s <value>] [-l <value>...] [-p <value>] [--input-po-path <value>] [-o <value>]
     [--output-format console|json] [--output-file <value>] [--po-file-prefix <value>] [--locale-format
     wp_locale|iso_639_1|iso_639_2|target_lang] [-F] [--use-dictionary] [--dictionary-path <value>] [--prompt-file-path
-    <value>] [--po-header-template-path <value>] [-b <value>] [-j <value>] [--timeout <value>] [--max-strings-per-job
-    <value>] [--max-total-strings <value>] [--max-cost <value>] [--max-retries <value>] [--retry-delay <value>]
-    [--abort-on-failure] [--skip-language-on-failure] [-v <value>] [--dry-run] [--save-debug-info] [--config <value>]
-    [--no-config] [--no-env]
+    <value>] [-b <value>] [-j <value>] [--timeout <value>] [--max-strings-per-job <value>] [--max-total-strings <value>]
+    [--max-retries <value>] [--retry-delay <value>] [--abort-on-failure] [--skip-language-on-failure] [-v <value>]
+    [--dry-run] [--save-debug-info] [--config <value>] [--no-config] [--no-env]
 
 BEHAVIOR FLAGS
-  -F, --force-translate                  [env: POLYPOT_FORCE_TRANSLATE] Re-translate all strings, ignoring any existing
-                                         translations.
-      --dictionary-path=<value>          [env: POLYPOT_DICTIONARY_PATH] Directory containing dictionary files.
-      --po-header-template-path=<value>  [env: POLYPOT_PO_HEADER_TEMPLATE_PATH] Path to the po-header.json file
-                                         containing custom PO file headers.
-      --prompt-file-path=<value>         [env: POLYPOT_PROMPT_FILE_PATH] Path to the prompt.md file containing
-                                         translation instructions.
-      --use-dictionary                   [env: POLYPOT_USE_DICTIONARY] Use the dictionary system for consistent
-                                         translations.
+  -F, --force-translate           [env: POLYPOT_FORCE_TRANSLATE] Re-translate all strings, ignoring any existing
+                                  translations.
+      --dictionary-path=<value>   [env: POLYPOT_DICTIONARY_PATH] Directory containing dictionary files.
+      --prompt-file-path=<value>  [env: POLYPOT_PROMPT_FILE_PATH] Path to the prompt.md file containing translation
+                                  instructions.
+      --use-dictionary            [env: POLYPOT_USE_DICTIONARY] Use the dictionary system for consistent translations.
 
 PERFORMANCE FLAGS
   -b, --batch-size=<value>  [env: POLYPOT_BATCH_SIZE] Strings per translation batch (1–100).
@@ -217,7 +216,6 @@ GLOBAL FLAGS
   --json  Format output as json.
 
 LIMITS FLAGS
-  --max-cost=<value>             [env: POLYPOT_MAX_COST] Limit total estimated translation cost in USD.
   --max-strings-per-job=<value>  [env: POLYPOT_MAX_STRINGS_PER_JOB] Limit the number of strings translated per language
                                  (testing aid).
   --max-total-strings=<value>    [env: POLYPOT_MAX_TOTAL_STRINGS] Limit total strings translated across all languages.

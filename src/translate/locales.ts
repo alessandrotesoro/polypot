@@ -1,3 +1,5 @@
+import { normalizeLanguageValue } from "../language-values.js";
+
 export const DEFAULT_PLURAL_FORMS = "nplurals=2; plural=(n != 1);";
 
 const PLURAL_FORMS: Readonly<Record<string, string>> = {
@@ -93,7 +95,7 @@ const PLURAL_FORMS: Readonly<Record<string, string>> = {
 };
 
 export function normalizeLocale(locale: string): string {
-	return locale.trim().replaceAll("-", "_");
+	return normalizeLanguageValue(locale).replaceAll("-", "_");
 }
 
 export function getBaseLanguage(locale: string): string {

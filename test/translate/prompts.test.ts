@@ -57,7 +57,9 @@ describe("translation prompts", () => {
 				template: template.prompt,
 			});
 
-			expect(prompt).to.equal("Translate en_US to fr_FR with 2 forms.");
+			expect(prompt).to.equal(
+				"Translate English (US) to French (France) with 2 forms.",
+			);
 		} finally {
 			await fs.rm(directory, { recursive: true, force: true });
 		}

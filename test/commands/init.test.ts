@@ -15,8 +15,10 @@ import {
 } from "../../src/config/store.js";
 import {
 	buildInitConfig,
+	DEFAULT_PROJECT_PROMPT_FILE_PATH,
 	setInitPromptAdapterForTests,
 } from "../../src/init/prompts.js";
+import { DEFAULT_TRANSLATION_PROMPT } from "../../src/translate/prompts.js";
 import { adapterFromAnswers } from "../helpers/prompt-adapter.js";
 
 /**
@@ -113,6 +115,15 @@ describe("polypot init", () => {
 			expect(config.source.sourceLanguage).to.equal(
 				DEFAULT_SOURCE_LANGUAGE,
 			);
+			expect(config.behavior.promptFilePath).to.equal(
+				DEFAULT_PROJECT_PROMPT_FILE_PATH,
+			);
+			expect(
+				fs.readFileSync(
+					path.join(projectDir, DEFAULT_PROJECT_PROMPT_FILE_PATH),
+					"utf8",
+				),
+			).to.equal(`${DEFAULT_TRANSLATION_PROMPT}\n`);
 			expect(
 				fs.existsSync(path.join(projectDir, ".polypot", ".env")),
 			).to.equal(false);
@@ -163,9 +174,9 @@ describe("polypot init", () => {
 				"--cwd",
 				projectDir,
 				"--source-language",
-				"it_IT",
+				"Italian",
 				"--target-languages",
-				"fr_FR,es_ES",
+				"French,Spanish",
 				"--pot-file-path",
 				"translations.pot",
 				"--output-dir",
@@ -749,13 +760,17 @@ describe("buildInitConfig", () => {
 		const config = buildInitConfig(existingConfig, {
 			outputDir: "new-output",
 			potFilePath: "new.pot",
-			sourceLanguage: "it_IT",
-			targetLanguages: ["de_DE"],
+			promptFilePath: DEFAULT_PROJECT_PROMPT_FILE_PATH,
+			sourceLanguage: "Italian",
+			targetLanguages: ["German"],
 		});
 		if (config === undefined) throw new Error("expected config input");
 
 		expect(config.provider).to.deep.equal(existingConfig.provider);
-		expect(config.behavior).to.deep.equal(existingConfig.behavior);
+		expect(config.behavior).to.deep.equal({
+			...existingConfig.behavior,
+			promptFilePath: DEFAULT_PROJECT_PROMPT_FILE_PATH,
+		});
 		expect(config.performance).to.deep.equal(existingConfig.performance);
 		expect(config.source).to.deep.equal({
 			inputPoPath: "existing.po",

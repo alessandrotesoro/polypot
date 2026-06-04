@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import path from "node:path";
 import { Command, Flags } from "@oclif/core";
 import type { ResolveConfigPathsOptions } from "../config/paths.js";
 import { resolveConfigPaths } from "../config/paths.js";
@@ -18,9 +19,11 @@ import {
 	buildInitConfig,
 	collectInitAnswers,
 	confirmInitUpdate,
+	DEFAULT_PROJECT_PROMPT_FILE_PATH,
 	defaultInitAnswers,
 	type InitAnswers,
 } from "../init/prompts.js";
+import { DEFAULT_TRANSLATION_PROMPT } from "../translate/prompts.js";
 
 interface InitResult {
 	readonly status: "cancelled" | "saved";
@@ -172,6 +175,7 @@ are added to .gitignore by default.
 			...storeOptions,
 			config: buildInitConfig(existingConfig.input, answers),
 		});
+		await this.writeProjectPromptFile(targetCwd, answers.promptFilePath);
 		if (answers.openaiApiKey !== undefined) {
 			await writeProjectSecrets({
 				...storeOptions,
@@ -239,6 +243,31 @@ are added to .gitignore by default.
 			projectSecrets: options.paths.projectEnv,
 			status: options.status,
 		};
+	}
+
+	private async writeProjectPromptFile(
+		targetCwd: string,
+		promptFilePath: string = DEFAULT_PROJECT_PROMPT_FILE_PATH,
+	): Promise<void> {
+		if (path.isAbsolute(promptFilePath)) return;
+
+		const outputPath = path.join(targetCwd, promptFilePath);
+		await fs.mkdir(path.dirname(outputPath), { recursive: true });
+		try {
+			await fs.writeFile(outputPath, `${DEFAULT_TRANSLATION_PROMPT}\n`, {
+				flag: "wx",
+			});
+		} catch (error) {
+			if (
+				typeof error === "object" &&
+				error !== null &&
+				"code" in error &&
+				error.code === "EEXIST"
+			) {
+				return;
+			}
+			throw error;
+		}
 	}
 
 	private logResult(result: InitResult, message: string): void {

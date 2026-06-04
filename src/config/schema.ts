@@ -6,6 +6,7 @@ import { z } from "zod";
 import {
 	isSafeLanguageValue,
 	LANGUAGE_VALUE_ERROR,
+	normalizeLanguageValue,
 } from "../language-values.js";
 
 export const DEFAULT_OPENAI_MODEL = "gpt-5.4-mini";
@@ -18,10 +19,15 @@ const ProviderConfig = z.object({
 	maxTokens: z.number().int().optional(),
 });
 
+const LanguageValue = z
+	.string()
+	.transform(normalizeLanguageValue)
+	.refine(isSafeLanguageValue, LANGUAGE_VALUE_ERROR);
+
 const SourceConfig = z.object({
-	sourceLanguage: z.string().default(DEFAULT_SOURCE_LANGUAGE),
+	sourceLanguage: LanguageValue.default(DEFAULT_SOURCE_LANGUAGE),
 	targetLanguages: z
-		.array(z.string().refine(isSafeLanguageValue, LANGUAGE_VALUE_ERROR))
+		.array(LanguageValue)
 		.refine(
 			(values) => new Set(values).size === values.length,
 			"Target languages cannot contain duplicate values.",
@@ -45,8 +51,7 @@ const BehaviorConfig = z.object({
 	forceTranslate: z.boolean().default(false),
 	useDictionary: z.boolean().default(false),
 	dictionaryPath: z.string().default("./config/dictionaries"),
-	promptFilePath: z.string().default("./config/prompt.md"),
-	poHeaderTemplatePath: z.string().default("./config/po-header.json"),
+	promptFilePath: z.string().optional(),
 });
 
 const PerformanceConfig = z.object({
@@ -58,7 +63,6 @@ const PerformanceConfig = z.object({
 const LimitsConfig = z.object({
 	maxStringsPerJob: z.number().int().min(1).optional(),
 	maxTotalStrings: z.number().int().min(1).optional(),
-	maxCost: z.number().min(0).optional(),
 });
 
 const RetriesConfig = z.object({

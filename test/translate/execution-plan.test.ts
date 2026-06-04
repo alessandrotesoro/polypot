@@ -79,7 +79,6 @@ describe("translate execution plan", () => {
 				behavior: {
 					dictionaryPath: path.join(directory, "dictionaries"),
 					forceTranslate: false,
-					poHeaderTemplatePath: path.join(directory, "po-header.txt"),
 					promptFilePath: path.join(directory, "prompt.md"),
 					useDictionary: false,
 				},
@@ -270,7 +269,7 @@ describe("translate execution plan", () => {
 		expect(allowed.ok).to.equal(true);
 	});
 
-	it("blocks dry-run cost planning when the provider has no estimator", async () => {
+	it("allows unsupported provider dry-run planning", async () => {
 		const input = buildInput();
 		const result = await buildTranslateExecutionPlan({
 			...input,
@@ -278,19 +277,14 @@ describe("translate execution plan", () => {
 			preview: {
 				...input.preview,
 				dryRun: true,
-				maxCost: 0.01,
 			},
 			settings: {
 				...input.settings,
 				debug: { ...input.settings.debug, dryRun: true },
-				limits: { maxCost: 0.01 },
 				provider: { ...input.settings.provider, provider: "gemini" },
 			},
 		});
 
-		expect(result.ok).to.equal(false);
-		expect(result.ok ? "" : result.blocker.code).to.equal(
-			"cost_estimator_unavailable",
-		);
+		expect(result.ok).to.equal(true);
 	});
 });

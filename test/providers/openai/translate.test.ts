@@ -87,7 +87,6 @@ describe("translateOpenAIBatch", () => {
 		expect(result.ok).to.equal(true);
 		if (!result.ok) throw new Error(result.error);
 		expect(result.translations[0]?.msgstr).to.deep.equal(["Bonjour"]);
-		expect(result.cost.totalTokens).to.equal(15);
 		expect(calls[0] as Record<string, unknown>).to.deep.include({
 			max_tokens: 500,
 			model: "gpt-5.4-mini",
@@ -109,7 +108,6 @@ describe("translateOpenAIBatch", () => {
 		expect(result.missingEntries.map((item) => item.msgid)).to.deep.equal([
 			"Hello",
 		]);
-		expect(result.cost.totalTokens).to.be.greaterThan(0);
 	});
 
 	it("blocks non-dry-run translation when the API key is missing", async () => {
@@ -250,10 +248,9 @@ describe("translateOpenAIBatch", () => {
 		expect(result.translations[0]?.msgstr).to.deep.equal([""]);
 		expect(result.translations[1]?.msgstr).to.deep.equal(["Enregistrer"]);
 		expect(result.validationStats.placeholderMismatches).to.equal(1);
-		expect(result.cost.totalTokens).to.equal(15);
 	});
 
-	it("reports paid attempt cost for malformed responses with usage", async () => {
+	it("reports malformed responses with debug context", async () => {
 		const result = await translateOpenAIBatch(
 			buildOptions({ maxRetries: 0 }),
 			clientFactory({
@@ -271,10 +268,10 @@ describe("translateOpenAIBatch", () => {
 
 		expect(result.ok).to.equal(false);
 		if (result.ok) throw new Error("expected failure");
-		expect(result.cost?.totalTokens).to.equal(15);
+		expect(result.debug?.response).to.equal('<t i="1"></t>');
 	});
 
-	it("accumulates semantic retry costs before a later successful response", async () => {
+	it("retries semantic failures before a later successful response", async () => {
 		const calls: unknown[] = [];
 		const responses: OpenAIChatCompletionResponse[] = [
 			{
@@ -316,9 +313,7 @@ describe("translateOpenAIBatch", () => {
 		expect(result.ok).to.equal(true);
 		if (!result.ok) throw new Error(result.error);
 		expect(calls).to.have.length(2);
-		expect(result.cost.promptTokens).to.equal(30);
-		expect(result.cost.completionTokens).to.equal(15);
-		expect(result.cost.totalTokens).to.equal(45);
+		expect(result.translations[0]?.msgstr).to.deep.equal(["Bonjour"]);
 	});
 
 	it("redacts API keys from provider error messages", async () => {

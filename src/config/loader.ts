@@ -37,7 +37,6 @@ export interface PolypotRuntimeConfig {
 
 export type ConfigPathKey =
 	| "behavior.dictionaryPath"
-	| "behavior.poHeaderTemplatePath"
 	| "behavior.promptFilePath"
 	| "output.outputDir"
 	| "output.outputFile"
@@ -128,7 +127,6 @@ function collectPathSources(
 ): PolypotRuntimeConfigSources {
 	const keys: readonly ConfigPathKey[] = [
 		"behavior.dictionaryPath",
-		"behavior.poHeaderTemplatePath",
 		"behavior.promptFilePath",
 		"output.outputDir",
 		"output.outputFile",

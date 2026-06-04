@@ -10,6 +10,8 @@ import {
 describe("translate locales", () => {
 	it("normalizes locale separators", () => {
 		expect(normalizeLocale("fr-FR")).to.equal("fr_FR");
+		expect(normalizeLocale("French")).to.equal("fr_FR");
+		expect(normalizeLocale("fra")).to.equal("fr_FR");
 		expect(getPoHeaderLocale("pt_BR")).to.equal("pt-BR");
 	});
 

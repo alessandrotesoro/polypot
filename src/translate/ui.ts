@@ -8,10 +8,6 @@ import {
 } from "listr2";
 import color from "yoctocolors";
 import { sanitizeTerminalText } from "../terminal.js";
-import {
-	knownTranslationEstimate,
-	unknownTranslationEstimate,
-} from "./cost.js";
 import type {
 	TranslateExecutionPlan,
 	TranslateExecutionPlanResult,
@@ -32,15 +28,9 @@ import type {
 	TranslationRunResult,
 	TranslationRunStatus,
 } from "./results.js";
-import type {
-	TranslatePreviewWorkload,
-	TranslationEstimate,
-} from "./workload.js";
+import type { TranslatePreviewWorkload } from "./workload.js";
 
-export type {
-	TranslateSettingsSnapshot,
-	TranslationEstimate,
-} from "./execution-plan.js";
+export type { TranslateSettingsSnapshot } from "./execution-plan.js";
 
 const PROGRESS_BAR_SIZE = 24;
 const numberFormatter = new Intl.NumberFormat("en-US");
@@ -51,14 +41,12 @@ type TranslateDebugEntry = NonNullable<
 export interface LanguagePreviewResult {
 	readonly batches: number;
 	readonly error?: string;
-	readonly estimate: TranslationEstimate;
 	readonly failed?: number;
 	readonly language: string;
 	readonly mergedFromExisting?: number;
 	readonly outputFile: string;
 	readonly skipReason?: TranslationLanguageResult["skipReason"];
 	readonly skippedByExisting?: number;
-	readonly skippedByCost: number;
 	readonly skippedByLimit: number;
 	readonly sourceStrings: number;
 	readonly state?: TranslationLanguageResult["state"];
@@ -93,7 +81,6 @@ export interface TranslateUiResult {
 		readonly forceTranslate: boolean;
 		readonly jobs: number;
 		readonly languages: readonly string[];
-		readonly maxCost?: number;
 		readonly maxStringsPerJob?: number;
 		readonly maxTotalStrings?: number;
 		readonly model: string;
@@ -106,7 +93,6 @@ export interface TranslateUiResult {
 	readonly results: readonly LanguagePreviewResult[];
 	readonly status: "blocked" | TranslationRunStatus;
 	readonly summary: string;
-	readonly cost?: TranslationRunResult["cost"];
 	readonly debug?: readonly TranslateDebugEntry[];
 	readonly totals?: TranslationRunResult["totals"];
 	readonly validation?: TranslationRunResult["validation"];
@@ -123,12 +109,6 @@ function buildProgressBar(value: number, total: number): string {
 	const progress = total > 0 ? Math.min(value / total, 1) : 1;
 
 	return cliProgress.Format.BarFormat(progress, progressBarOptions);
-}
-
-function formatCurrency(value: number): string {
-	if (value > 0 && value < 0.0001) return "<$0.0001";
-
-	return `$${value.toFixed(4)}`;
 }
 
 function formatNumber(value: number): string {
@@ -180,9 +160,6 @@ function formatLimits(preview: TranslateUiPreviewOptions): string {
 		preview.maxTotalStrings === undefined
 			? undefined
 			: `global ${preview.maxTotalStrings}`,
-		preview.maxCost === undefined
-			? undefined
-			: `budget ${formatCurrency(preview.maxCost)}`,
 	].filter((limit): limit is string => limit !== undefined);
 
 	return limits.length === 0 ? "none" : limits.join(" | ");
@@ -271,15 +248,6 @@ function buildSummaryFromResult(result: TranslateUiResult): string {
 			9,
 		),
 	);
-	const cost =
-		result.cost?.totalCost ??
-		result.results.reduce(
-			(total, language) =>
-				total +
-				(language.estimate.costKnown ? language.estimate.cost : 0),
-			0,
-		);
-
 	return [
 		"Preview complete",
 		"",
@@ -298,17 +266,12 @@ function buildSummaryFromResult(result: TranslateUiResult): string {
 				),
 			),
 		),
-		row("Cost", `~${formatCurrency(cost)}`),
-		row(
-			"Skipped",
-			`${formatNumber(totals.skippedByLimit)} by limits, ${formatNumber(totals.skippedByCost)} by cost`,
-		),
+		row("Skipped", `${formatNumber(totals.skippedByLimit)} by limits`),
 		"",
 		"Outputs",
 		...languageLines,
 		"",
 		"No translations were written.",
-		"Estimate note: token and cost numbers are local planning estimates only.",
 	].join("\n");
 }
 
@@ -338,7 +301,6 @@ function buildBaseResult(
 			forceTranslate: config.forceTranslate,
 			jobs: preview.jobs,
 			languages: preview.languages,
-			...(preview.maxCost !== undefined && { maxCost: preview.maxCost }),
 			...(preview.maxStringsPerJob !== undefined && {
 				maxStringsPerJob: preview.maxStringsPerJob,
 			}),
@@ -401,9 +363,6 @@ function buildExecuteOptions(
 		...(settings.source.inputPoPath !== undefined && {
 			inputPoPath: settings.source.inputPoPath,
 		}),
-		...(settings.limits.maxCost !== undefined && {
-			maxCost: settings.limits.maxCost,
-		}),
 		...(settings.limits.maxStringsPerJob !== undefined && {
 			maxStringsPerJob: settings.limits.maxStringsPerJob,
 		}),
@@ -416,9 +375,6 @@ function buildExecuteOptions(
 		...(settings.output.poFilePrefix !== undefined && {
 			poFilePrefix: settings.output.poFilePrefix,
 		}),
-		...(settings.behavior.poHeaderTemplatePath !== undefined && {
-			poHeaderTemplatePath: settings.behavior.poHeaderTemplatePath,
-		}),
 		...(settings.behavior.promptFilePath !== undefined && {
 			promptFilePath: settings.behavior.promptFilePath,
 		}),
@@ -427,25 +383,9 @@ function buildExecuteOptions(
 
 function toUiLanguageResult(
 	language: TranslationLanguageResult,
-	workloadLanguage?: TranslatePreviewWorkload["languages"][number],
 ): LanguagePreviewResult {
 	return {
 		batches: language.batches,
-		estimate:
-			language.costKnown === false
-				? (workloadLanguage?.estimate ??
-					unknownTranslationEstimate({
-						inputTokens: language.cost.promptTokens,
-						outputTokens: language.cost.completionTokens,
-						unavailableReason:
-							language.costUnavailableReason ??
-							"Provider-specific price estimate is unavailable.",
-					}))
-				: knownTranslationEstimate({
-						cost: language.cost.totalCost,
-						inputTokens: language.cost.promptTokens,
-						outputTokens: language.cost.completionTokens,
-					}),
 		language: language.language,
 		...(language.error !== undefined && { error: language.error }),
 		failed: language.failed,
@@ -455,7 +395,6 @@ function toUiLanguageResult(
 			skipReason: language.skipReason,
 		}),
 		skippedByExisting: language.skippedByExisting,
-		skippedByCost: language.skippedByCost,
 		skippedByLimit: language.skippedByLimit,
 		sourceStrings: language.sourceStrings,
 		state: language.state,
@@ -483,18 +422,9 @@ function toUiResult(
 			sourceCharacters: result.analysis.sourceCharacters,
 			totalStrings: result.analysis.totalStrings,
 		},
-		results: result.results.map((language) =>
-			toUiLanguageResult(
-				language,
-				plan.workload.languages.find(
-					(workloadLanguage) =>
-						workloadLanguage.language === language.language,
-				),
-			),
-		),
+		results: result.results.map((language) => toUiLanguageResult(language)),
 		status: result.status,
 		summary: result.summary,
-		cost: result.cost,
 		debug: result.results.flatMap((language) => language.debug ?? []),
 		totals: result.totals,
 		validation: result.validation,
@@ -545,14 +475,6 @@ function updateProgressState(
 			updateCurrent((state) => ({
 				...state,
 				phase: `Batch ${event.batch}/${event.totalBatches}`,
-			}));
-			return;
-		case "batch-skipped":
-			updateCurrent((state) => ({
-				...state,
-				phase: `Skipped batch ${event.batch}: ${event.reason}`,
-				plannedStrings: event.totalStrings,
-				processedStrings: state.processedStrings + event.skippedStrings,
 			}));
 			return;
 		case "batch-failed":

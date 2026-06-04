@@ -11,11 +11,7 @@ import {
 	isCompleteExistingTranslation,
 } from "./completeness.js";
 import { getPluralCount, getPluralForms } from "./locales.js";
-import {
-	buildPoHeaders,
-	loadPoHeaderTemplate,
-	type PoHeaderTemplateResult,
-} from "./po-headers.js";
+import { buildPoHeaders } from "./po-headers.js";
 import type { PotDocument, PotEntry } from "./pot.js";
 import type { ParsedTranslation } from "./xml.js";
 
@@ -26,7 +22,6 @@ export interface ExistingPoMergeResult {
 
 export interface PoOutputDocument {
 	readonly data: GetTextTranslations;
-	readonly headerTemplate: PoHeaderTemplateResult;
 	readonly pluralCount: number;
 }
 
@@ -101,28 +96,21 @@ export async function readPoFile(
 
 export async function createPoOutputDocument(options: {
 	readonly document: PotDocument;
-	readonly poHeaderTemplatePath?: string;
 	readonly targetLanguage: string;
 }): Promise<PoOutputDocument> {
 	const data = cloneTranslations(options.document.parsed);
 	const pluralForms = getPluralForms(options.targetLanguage);
 	const pluralCount = getPluralCount(pluralForms);
-	const headerTemplate =
-		options.poHeaderTemplatePath === undefined
-			? { headers: {} }
-			: await loadPoHeaderTemplate(options.poHeaderTemplatePath);
 
 	data.headers = buildPoHeaders({
 		baseHeaders: data.headers,
 		targetLanguage: options.targetLanguage,
-		templateHeaders: headerTemplate.headers,
 	});
 	data.charset = "utf-8";
 	initializeTargetEntries(data, options.document.entries, pluralCount);
 
 	return {
 		data,
-		headerTemplate,
 		pluralCount,
 	};
 }

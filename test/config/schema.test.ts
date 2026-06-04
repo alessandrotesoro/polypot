@@ -17,6 +17,23 @@ describe("PolypotConfigSchema", () => {
 		expect(result.source.sourceLanguage).to.equal(DEFAULT_SOURCE_LANGUAGE);
 		expect(result.source.targetLanguages).to.deep.equal([]);
 		expect(result.output.outputDir).to.equal(".");
+		expect(result.behavior.promptFilePath).to.equal(undefined);
+	});
+
+	it("normalizes known source and target languages", () => {
+		const result = PolypotConfigSchema.parse({
+			source: {
+				sourceLanguage: "English",
+				targetLanguages: ["French", "spa", "de-DE"],
+			},
+		});
+
+		expect(result.source.sourceLanguage).to.equal("en_US");
+		expect(result.source.targetLanguages).to.deep.equal([
+			"fr_FR",
+			"es_ES",
+			"de_DE",
+		]);
 	});
 
 	it("rejects invalid preview numeric bounds from config", () => {
@@ -25,7 +42,6 @@ describe("PolypotConfigSchema", () => {
 			{ performance: { batchSize: 101 } },
 			{ performance: { jobs: 0 } },
 			{ performance: { jobs: 11 } },
-			{ limits: { maxCost: -1 } },
 			{ limits: { maxStringsPerJob: 0 } },
 			{ limits: { maxTotalStrings: 0 } },
 			{ output: { localeFormat: "invalid_format" } },
@@ -33,6 +49,7 @@ describe("PolypotConfigSchema", () => {
 			{ source: { targetLanguages: ["fr/FR"] } },
 			{ source: { targetLanguages: [""] } },
 			{ source: { targetLanguages: ["fr_FR", "fr_FR"] } },
+			{ source: { targetLanguages: ["French", "fr_FR"] } },
 		];
 
 		for (const config of invalidConfigs) {

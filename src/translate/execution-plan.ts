@@ -1,12 +1,6 @@
 import path from "node:path";
 import type { PolypotSecrets } from "../config/secrets.js";
-import {
-	calculateOpenAICost,
-	estimateCompletionTokens,
-	type OpenAICost,
-} from "../providers/openai/pricing.js";
 import { buildTranslationBatchPlan } from "./batches.js";
-import { knownTranslationEstimate } from "./cost.js";
 import { getBaseLanguage } from "./locales.js";
 import {
 	type ExistingPoMergeSource,
@@ -25,12 +19,7 @@ import {
 	buildTranslateWorkload,
 	type LocaleFormat,
 	type TranslatePreviewWorkload,
-	type TranslationEstimate,
 } from "./workload.js";
-
-const ESTIMATED_CHARS_PER_TOKEN = 4;
-
-export type { TranslationEstimate } from "./workload.js";
 
 export interface TranslateUiPreviewOptions {
 	readonly batchSize: number;
@@ -38,7 +27,6 @@ export interface TranslateUiPreviewOptions {
 	readonly jobs: number;
 	readonly languages: readonly string[];
 	readonly localeFormat: LocaleFormat;
-	readonly maxCost?: number;
 	readonly maxStringsPerJob?: number;
 	readonly maxTotalStrings?: number;
 	readonly outputDir: string;
@@ -59,8 +47,7 @@ export interface TranslateSettingsSnapshot {
 	readonly behavior: {
 		readonly dictionaryPath: string;
 		readonly forceTranslate: boolean;
-		readonly poHeaderTemplatePath: string;
-		readonly promptFilePath: string;
+		readonly promptFilePath?: string;
 		readonly useDictionary: boolean;
 	};
 	readonly debug: {
@@ -70,7 +57,6 @@ export interface TranslateSettingsSnapshot {
 		readonly verboseLevel: number;
 	};
 	readonly limits: {
-		readonly maxCost?: number;
 		readonly maxStringsPerJob?: number;
 		readonly maxTotalStrings?: number;
 	};
@@ -114,7 +100,6 @@ export interface TranslateInputPlan {
 }
 
 export type TranslatePlanBlockerCode =
-	| "cost_estimator_unavailable"
 	| "duplicate_output_file"
 	| "input_po_path_ambiguous"
 	| "missing_pot_file_path"
@@ -422,26 +407,6 @@ async function hasPlannedProviderWork(options: {
 	return false;
 }
 
-function buildOpenAIEstimator(model: string) {
-	return (sourceCharacters: number): TranslationEstimate => {
-		const inputTokens = Math.ceil(
-			sourceCharacters / ESTIMATED_CHARS_PER_TOKEN,
-		);
-		const outputTokens = estimateCompletionTokens(inputTokens);
-		const cost: OpenAICost = calculateOpenAICost({
-			completionTokens: outputTokens,
-			model,
-			promptTokens: inputTokens,
-		});
-
-		return knownTranslationEstimate({
-			cost: cost.totalCost,
-			inputTokens,
-			outputTokens,
-		});
-	};
-}
-
 async function readPlannedPotDocument(
 	input: TranslateInputPlan,
 ): Promise<TranslateExecutionPlanResult | PotDocument> {
@@ -535,17 +500,7 @@ export async function buildTranslateExecutionPlan(
 
 	const document = await readPlannedPotDocument(input);
 	if ("ok" in document) return document;
-	const estimateCost =
-		input.config.provider === "openai"
-			? buildOpenAIEstimator(input.config.model)
-			: undefined;
-	const workload = buildTranslateWorkload(
-		{
-			...input.preview,
-			...(estimateCost !== undefined && { estimateCost }),
-		},
-		document.analysis,
-	);
+	const workload = buildTranslateWorkload(input.preview, document.analysis);
 	const mergeSources = new Map(
 		mergePlan.sources.map((source) => [source.language, source.source]),
 	);
@@ -557,21 +512,6 @@ export async function buildTranslateExecutionPlan(
 					mergeSources,
 				})
 			: false;
-	if (
-		input.config.provider !== "openai" &&
-		input.preview.dryRun &&
-		input.preview.maxCost !== undefined &&
-		providerWorkPlanned
-	) {
-		return {
-			blocker: {
-				code: "cost_estimator_unavailable",
-				message: `Provider ${input.config.provider} does not have a cost estimator, so --max-cost cannot be enforced for dry-run planning.`,
-			},
-			input,
-			ok: false,
-		};
-	}
 	if (
 		input.config.provider !== "openai" &&
 		!input.preview.dryRun &&

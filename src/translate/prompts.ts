@@ -1,10 +1,11 @@
 import fs from "node:fs/promises";
+import { getLanguageDisplayName } from "../language-values.js";
 import type { DictionaryMatch } from "./dictionary.js";
 import type { PotEntry } from "./pot.js";
 import { extractProtectedTokens } from "./validation.js";
 import { escapeXml } from "./xml.js";
 
-const DEFAULT_TRANSLATION_PROMPT = `You are a professional software localization translator.
+export const DEFAULT_TRANSLATION_PROMPT = `You are a professional software localization translator.
 Translate the user's XML source entries into the requested target language.
 Preserve placeholders, HTML tags, bracket tokens, whitespace, and XML response structure.
 Return only <t i="N">...</t> response tags.`;
@@ -25,9 +26,12 @@ function replacePromptVariables(options: {
 	readonly targetLanguage: string;
 	readonly template: string;
 }): string {
+	const sourceLanguageName = getLanguageDisplayName(options.sourceLanguage);
+	const targetLanguageName = getLanguageDisplayName(options.targetLanguage);
+
 	return options.template
-		.replaceAll("{{SOURCE_LANGUAGE}}", options.sourceLanguage)
-		.replaceAll("{{TARGET_LANGUAGE}}", options.targetLanguage)
+		.replaceAll("{{SOURCE_LANGUAGE}}", sourceLanguageName)
+		.replaceAll("{{TARGET_LANGUAGE}}", targetLanguageName)
 		.replaceAll("{{TARGET_LANGUAGE_CODE}}", options.targetLanguage)
 		.replaceAll("{{PLURAL_COUNT}}", String(options.pluralCount));
 }
@@ -71,14 +75,16 @@ export async function loadPromptTemplate(
 	if (filePath === undefined) return { prompt: DEFAULT_TRANSLATION_PROMPT };
 
 	try {
-		return { prompt: await fs.readFile(filePath, "utf8") };
+		const prompt = await fs.readFile(filePath, "utf8");
+		if (prompt.trim().length === 0) {
+			throw new Error("Prompt file is empty.");
+		}
+
+		return { prompt };
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
 
-		return {
-			prompt: DEFAULT_TRANSLATION_PROMPT,
-			warning: `Could not read prompt template: ${message}`,
-		};
+		throw new Error(`Could not read prompt template: ${message}`);
 	}
 }
 

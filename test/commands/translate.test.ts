@@ -24,13 +24,11 @@ const EXPECTED_FLAGS = [
 	"--use-dictionary",
 	"--dictionary-path",
 	"--prompt-file-path",
-	"--po-header-template-path",
 	"--batch-size",
 	"--jobs",
 	"--timeout",
 	"--max-strings-per-job",
 	"--max-total-strings",
-	"--max-cost",
 	"--max-retries",
 	"--retry-delay",
 	"--abort-on-failure",
@@ -141,6 +139,32 @@ msgstr[1] "%d fichiers"
 		for (const flag of EXPECTED_FLAGS) {
 			expect(stdout, `expected --help to list ${flag}`).to.include(flag);
 		}
+		expect(stdout).to.not.include("--max-cost");
+		expect(stdout).to.not.include("--po-header-template-path");
+	});
+
+	it("rejects removed cost and header flags as unknown", async () => {
+		const removedFlagCases = [
+			["--max-cost", "1"],
+			["--po-header-template-path", "headers.json"],
+		] as const;
+
+		for (const removedFlagCase of removedFlagCases) {
+			const { error } = await runCommand([
+				"translate",
+				"-l",
+				"fr_FR",
+				"-p",
+				"foo.pot",
+				"--dry-run",
+				...removedFlagCase,
+			]);
+
+			expect(
+				error,
+				`expected ${removedFlagCase[0]} to be rejected`,
+			).to.not.equal(undefined);
+		}
 	});
 
 	it("exposes the documented helpGroup labels", async () => {
@@ -156,13 +180,15 @@ msgstr[1] "%d fichiers"
 		expect(stdout).to.include("CONFIG FLAGS");
 	});
 
-	it("parses comma-separated --target-languages and short flags", async () => {
+	it("normalizes comma-separated language inputs and short flags", async () => {
 		const potFile = await writePotFixture();
 		const { stdout, error } = await runCommand([
 			"translate",
 			"--json",
 			"-l",
-			"fr_FR,es_ES",
+			"French,Spanish",
+			"-s",
+			"English",
 			"-p",
 			potFile,
 			"-b",
@@ -180,6 +206,7 @@ msgstr[1] "%d fichiers"
 				readonly batchSize: number;
 				readonly dryRun: boolean;
 				readonly languages: readonly string[];
+				readonly sourceLanguage: string;
 			};
 			readonly status: string;
 		};
@@ -189,6 +216,7 @@ msgstr[1] "%d fichiers"
 		expect(result.mode).to.equal("dry-run");
 		expect(result.status).to.equal("dry-run");
 		expect(result.plan.languages).to.deep.equal(["fr_FR", "es_ES"]);
+		expect(result.plan.sourceLanguage).to.equal("en_US");
 		expect(result.plan.batchSize).to.equal(30);
 		expect(result.plan.dryRun).to.equal(true);
 	});
@@ -202,23 +230,6 @@ msgstr[1] "%d fichiers"
 			"yaml",
 		]);
 		expect(error).to.not.equal(undefined);
-	});
-
-	it("rejects an invalid --max-cost value", async () => {
-		const { error } = await runCommand([
-			"translate",
-			"-l",
-			"fr_FR",
-			"-p",
-			"foo.pot",
-			"--max-cost",
-			"not-a-number",
-		]);
-
-		expect(error).to.not.equal(undefined);
-		expect(error?.message).to.include(
-			"--max-cost must be a non-negative number",
-		);
 	});
 
 	it("rejects preview numeric values outside documented ranges", async () => {
@@ -244,10 +255,6 @@ msgstr[1] "%d fichiers"
 				args: ["--max-total-strings", "0"],
 				message:
 					"--max-total-strings must be an integer greater than or equal to 1",
-			},
-			{
-				args: ["--max-cost", "12abc"],
-				message: "--max-cost must be a non-negative number",
 			},
 			{
 				args: ["--max-retries", "11"],
@@ -315,7 +322,7 @@ msgstr[1] "%d fichiers"
 		const { error } = await runCommand([
 			"translate",
 			"-l",
-			"fr_FR,fr_FR",
+			"French,fr_FR",
 			"-p",
 			"foo.pot",
 			"--dry-run",
@@ -569,7 +576,7 @@ msgstr[1] "%d fichiers"
 		});
 	});
 
-	it("allows unsupported provider dry-run when no provider cost gate is requested", async () => {
+	it("allows unsupported provider dry-run", async () => {
 		const potFile = await writePotFixture();
 		const { stdout, error } = await runCommand([
 			"translate",
@@ -584,9 +591,6 @@ msgstr[1] "%d fichiers"
 		]);
 		const result = JSON.parse(stdout) as {
 			readonly results: readonly {
-				readonly estimate: {
-					readonly costKnown: boolean;
-				};
 				readonly status: string;
 			}[];
 			readonly status: string;
@@ -595,35 +599,6 @@ msgstr[1] "%d fichiers"
 		expect(error).to.equal(undefined);
 		expect(result.status).to.equal("dry-run");
 		expect(result.results[0]?.status).to.equal("dry-run");
-		expect(result.results[0]?.estimate.costKnown).to.equal(false);
-	});
-
-	it("blocks unsupported provider dry-run when max cost requires an estimator", async () => {
-		const potFile = await writePotFixture();
-		const { stdout, error } = await runCommand([
-			"translate",
-			"--json",
-			"--provider",
-			"gemini",
-			"-l",
-			"fr_FR",
-			"-p",
-			potFile,
-			"--dry-run",
-			"--max-cost",
-			"0.01",
-		]);
-		const result = JSON.parse(stdout) as {
-			readonly error: {
-				readonly code: string;
-			};
-			readonly status: string;
-		};
-
-		expect(error).to.equal(undefined);
-		expect(process.exitCode).to.equal(1);
-		expect(result.status).to.equal("blocked");
-		expect(result.error.code).to.equal("cost_estimator_unavailable");
 	});
 
 	it("blocks unsupported live providers only when provider work is planned", async () => {
@@ -841,8 +816,6 @@ msgstr[1] "%d fichiers"
 			"dicts",
 			"--prompt-file-path",
 			"prompt.md",
-			"--po-header-template-path",
-			"header.json",
 			"--batch-size",
 			"10",
 			"--jobs",
@@ -853,8 +826,6 @@ msgstr[1] "%d fichiers"
 			"15",
 			"--max-total-strings",
 			"25",
-			"--max-cost",
-			"1.25",
 			"--max-retries",
 			"4",
 			"--retry-delay",
@@ -874,7 +845,6 @@ msgstr[1] "%d fichiers"
 				readonly settings: {
 					readonly behavior: {
 						readonly dictionaryPath: string;
-						readonly poHeaderTemplatePath: string;
 						readonly promptFilePath: string;
 						readonly useDictionary: boolean;
 					};
@@ -883,7 +853,6 @@ msgstr[1] "%d fichiers"
 						readonly verboseLevel: number;
 					};
 					readonly limits: {
-						readonly maxCost: number;
 						readonly maxStringsPerJob: number;
 						readonly maxTotalStrings: number;
 					};
@@ -905,6 +874,7 @@ msgstr[1] "%d fichiers"
 					readonly source: {
 						readonly inputPoPath: string;
 						readonly potFilePath: string;
+						readonly sourceLanguage: string;
 						readonly targetLanguages: readonly string[];
 					};
 				};
@@ -927,13 +897,11 @@ msgstr[1] "%d fichiers"
 		});
 		expect(settings.behavior).to.deep.include({
 			dictionaryPath: "dicts",
-			poHeaderTemplatePath: "header.json",
 			promptFilePath: "prompt.md",
 			useDictionary: true,
 		});
 		expect(settings.performance.timeout).to.equal(30);
 		expect(settings.limits).to.deep.equal({
-			maxCost: 1.25,
 			maxStringsPerJob: 15,
 			maxTotalStrings: 25,
 		});

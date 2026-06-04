@@ -1,6 +1,7 @@
 import { expect } from "chai";
 import {
 	formatSetupLanguage,
+	normalizeSetupLanguageInput,
 	SETUP_LANGUAGES,
 	setupLanguageChoices,
 } from "../../src/setup/languages.js";
@@ -46,8 +47,23 @@ describe("setup language catalog", () => {
 
 	it("formats known and unknown language values", () => {
 		expect(formatSetupLanguage("de_DE")).to.equal("German (de_DE)");
+		expect(formatSetupLanguage("French")).to.equal(
+			"French (France) (fr_FR)",
+		);
 		expect(formatSetupLanguage("unknown_XX")).to.equal(
 			"unknown_XX (custom)",
+		);
+	});
+
+	it("normalizes Potomatic-style language inputs", () => {
+		expect(normalizeSetupLanguageInput("French")).to.equal("fr_FR");
+		expect(normalizeSetupLanguageInput("fr")).to.equal("fr_FR");
+		expect(normalizeSetupLanguageInput("fra")).to.equal("fr_FR");
+		expect(normalizeSetupLanguageInput("fr-FR")).to.equal("fr_FR");
+		expect(normalizeSetupLanguageInput("fr-fr")).to.equal("fr_FR");
+		expect(normalizeSetupLanguageInput("Spanish")).to.equal("es_ES");
+		expect(normalizeSetupLanguageInput("unknown_XX")).to.equal(
+			"unknown_XX",
 		);
 	});
 });

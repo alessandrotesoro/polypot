@@ -4,7 +4,6 @@ import path from "node:path";
 import { expect } from "chai";
 import { po } from "gettext-parser";
 import { createPolypotSecrets } from "../../src/config/secrets.js";
-import { calculateOpenAICost } from "../../src/providers/openai/pricing.js";
 import type { OpenAITranslateBatchResult } from "../../src/providers/openai/translate.js";
 import {
 	type ExecuteTranslateOptions,
@@ -28,14 +27,6 @@ msgid_plural "%d files"
 msgstr[0] ""
 msgstr[1] ""
 `;
-
-function successCost() {
-	return calculateOpenAICost({
-		completionTokens: 5,
-		model: "gpt-5.4-mini",
-		promptTokens: 10,
-	});
-}
 
 async function makeProject(): Promise<{
 	readonly cleanup: () => Promise<void>;
@@ -88,7 +79,6 @@ function buildOptions(
 const fakeTranslateBatch: TranslateBatchFunction = async (
 	options,
 ): Promise<OpenAITranslateBatchResult> => ({
-	cost: successCost(),
 	debug: { messages: [] },
 	dryRun: false,
 	missingEntries: [],
@@ -237,79 +227,6 @@ describe("executeTranslate", () => {
 		}
 	});
 
-	it("stops before a batch that would exceed the cost limit", async () => {
-		const project = await makeProject();
-		let calls = 0;
-
-		try {
-			const result = await executeTranslate(
-				buildOptions(project, {
-					batchSize: 2,
-					maxCost: 0,
-				}),
-				async () => {
-					calls += 1;
-					return {
-						cost: successCost(),
-						debug: { messages: [] },
-						dryRun: true,
-						missingEntries: [],
-						ok: true,
-						translations: [],
-						validationStats: {
-							blankedStrings: [],
-							placeholderMismatches: 0,
-							pluralFormIssues: 0,
-						},
-					};
-				},
-			);
-
-			expect(result.status).to.equal("failed");
-			expect(calls).to.equal(1);
-			expect(result.results[0]).to.deep.include({
-				skippedByCost: 3,
-				state: "cost_skipped",
-				translated: 0,
-			});
-			expect(result.totals.skippedByCost).to.equal(3);
-		} finally {
-			await project.cleanup();
-		}
-	});
-
-	it("returns ordered not-started rows for later languages after cost stop", async () => {
-		const project = await makeProject();
-
-		try {
-			const result = await executeTranslate(
-				buildOptions(project, {
-					maxCost: 0,
-					targetLanguages: ["fr_FR", "es_ES", "de_DE"],
-				}),
-				fakeTranslateBatch,
-			);
-
-			expect(result.results.map((item) => item.language)).to.deep.equal([
-				"fr_FR",
-				"es_ES",
-				"de_DE",
-			]);
-			expect(result.results[1]).to.deep.include({
-				skipReason: "cost-limit",
-				state: "not_started",
-				status: "skipped",
-			});
-			expect(result.results[2]).to.deep.include({
-				skipReason: "cost-limit",
-				state: "not_started",
-				status: "skipped",
-			});
-		} finally {
-			await project.cleanup();
-		}
-	});
-
 	it("returns ordered not-started rows for later languages after abort failure", async () => {
 		const project = await makeProject();
 
@@ -340,68 +257,6 @@ describe("executeTranslate", () => {
 		}
 	});
 
-	it("writes paid safe translations before stopping after actual cost exceeds the cost limit", async () => {
-		const project = await makeProject();
-		let calls = 0;
-
-		try {
-			const result = await executeTranslate(
-				buildOptions(project, {
-					batchSize: 2,
-					maxCost: 0.00001,
-				}),
-				async (options) => {
-					calls += 1;
-					return {
-						cost: options.dryRun
-							? calculateOpenAICost({
-									completionTokens: 0,
-									model: "gpt-5.4-mini",
-									promptTokens: 0,
-								})
-							: calculateOpenAICost({
-									completionTokens: 1_000_000,
-									model: "gpt-5.4-mini",
-									promptTokens: 1_000_000,
-								}),
-						debug: { messages: [] },
-						dryRun: options.dryRun,
-						missingEntries: [],
-						ok: true,
-						translations: options.entries.map((entry) => ({
-							entry,
-							msgstr: [`${entry.msgid} FR`],
-						})),
-						validationStats: {
-							blankedStrings: [],
-							placeholderMismatches: 0,
-							pluralFormIssues: 0,
-						},
-					};
-				},
-			);
-
-			expect(result.status).to.equal("failed");
-			expect(calls).to.equal(2);
-			expect(result.results[0]).to.deep.include({
-				skippedByCost: 1,
-				state: "cost_skipped",
-				translated: 2,
-			});
-			const output = po.parse(
-				await fs.readFile(
-					path.join(project.directory, "languages/fr_FR.po"),
-				),
-				{ validation: false },
-			);
-			expect(output.translations[""]?.["Hello"]?.msgstr).to.deep.equal([
-				"Hello FR",
-			]);
-		} finally {
-			await project.cleanup();
-		}
-	});
-
 	it("counts validation-rejected translations as failed", async () => {
 		const project = await makeProject();
 
@@ -409,7 +264,6 @@ describe("executeTranslate", () => {
 			const result = await executeTranslate(
 				buildOptions(project, { batchSize: 2 }),
 				async (options) => ({
-					cost: successCost(),
 					debug: { messages: [] },
 					dryRun: false,
 					missingEntries: [],
@@ -488,7 +342,7 @@ describe("executeTranslate", () => {
 		}
 	});
 
-	it("surfaces prompt and dictionary loader warnings", async () => {
+	it("fails when an explicit prompt template cannot be read", async () => {
 		const project = await makeProject();
 		const dictionaryDir = path.join(project.directory, "dictionaries");
 		await fs.mkdir(dictionaryDir);
@@ -507,13 +361,40 @@ describe("executeTranslate", () => {
 				fakeTranslateBatch,
 			);
 
-			expect(result.status).to.equal("completed");
-			expect(result.results[0]?.warning).to.include(
+			expect(result.status).to.equal("failed");
+			expect(result.results[0]).to.deep.include({
+				failed: 0,
+				state: "execution_failed",
+				status: "failed",
+				translated: 0,
+			});
+			expect(result.results[0]?.error).to.include(
 				"Could not read prompt template",
 			);
-			expect(result.results[0]?.warning).to.include(
-				"Dictionary must be a JSON object",
+		} finally {
+			await project.cleanup();
+		}
+	});
+
+	it("fails when an explicit prompt template is empty", async () => {
+		const project = await makeProject();
+		const promptFile = path.join(project.directory, "prompt.md");
+		await fs.writeFile(promptFile, "  \n");
+
+		try {
+			const result = await executeTranslate(
+				buildOptions(project, { promptFilePath: promptFile }),
+				fakeTranslateBatch,
 			);
+
+			expect(result.status).to.equal("failed");
+			expect(result.results[0]).to.deep.include({
+				failed: 0,
+				state: "execution_failed",
+				status: "failed",
+				translated: 0,
+			});
+			expect(result.results[0]?.error).to.include("Prompt file is empty");
 		} finally {
 			await project.cleanup();
 		}

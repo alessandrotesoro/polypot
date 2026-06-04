@@ -1,6 +1,10 @@
 import type { PolypotConfig } from "../config/schema.js";
 import type { PolypotSecrets } from "../config/secrets.js";
 import {
+	normalizeLanguageValue,
+	normalizeLanguageValues,
+} from "../language-values.js";
+import {
 	currentPromptAdapter,
 	messageWithDefault,
 	type PromptAdapter,
@@ -68,8 +72,10 @@ export function buildSetupConfig(
 		},
 		source: {
 			...existingConfig.source,
-			sourceLanguage: answers.sourceLanguage,
-			targetLanguages: [...answers.targetLanguages],
+			sourceLanguage: normalizeLanguageValue(answers.sourceLanguage),
+			targetLanguages: [
+				...normalizeLanguageValues(answers.targetLanguages),
+			],
 		},
 	};
 }

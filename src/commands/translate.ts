@@ -9,6 +9,8 @@ import { polypotEnv } from "../flag-helpers.js";
 import {
 	isSafeLanguageValue,
 	LANGUAGE_VALUE_ERROR,
+	normalizeLanguageValue,
+	normalizeLanguageValues,
 } from "../language-values.js";
 import { sanitizeTerminalText } from "../terminal.js";
 import { buildTranslateExecutionPlan } from "../translate/execution-plan.js";
@@ -174,12 +176,6 @@ each target language.
 			env: polypotEnv("prompt-file-path"),
 			helpGroup: "BEHAVIOR",
 		}),
-		"po-header-template-path": Flags.string({
-			summary:
-				"Path to the po-header.json file containing custom PO file headers.",
-			env: polypotEnv("po-header-template-path"),
-			helpGroup: "BEHAVIOR",
-		}),
 
 		"batch-size": Flags.integer({
 			char: "b",
@@ -210,12 +206,6 @@ each target language.
 			env: polypotEnv("max-total-strings"),
 			helpGroup: "LIMITS",
 		}),
-		"max-cost": Flags.string({
-			summary: "Limit total estimated translation cost in USD.",
-			env: polypotEnv("max-cost"),
-			helpGroup: "LIMITS",
-		}),
-
 		"max-retries": Flags.integer({
 			summary: "Retry attempts per batch (0–10).",
 			env: polypotEnv("max-retries"),
@@ -320,7 +310,6 @@ each target language.
 			"--retry-delay",
 			{ max: 30000, min: 500 },
 		);
-		const maxCost = this.resolveMaxCost();
 		const maxStringsPerJob = this.resolveOptionalBoundedInteger(
 			this.flags["max-strings-per-job"] ??
 				this.appConfig.limits.maxStringsPerJob,
@@ -339,6 +328,7 @@ each target language.
 		const potFilePath = this.resolvePotFilePath();
 		const verboseLevel =
 			this.flags["verbose-level"] ?? this.appConfig.debug.verboseLevel;
+		const sourceLanguage = this.resolveSourceLanguage();
 		const languages = this.resolveTargetLanguages();
 		const settings = this.buildSettingsSnapshot({
 			batchSize,
@@ -346,10 +336,10 @@ each target language.
 			languages,
 			maxRetries,
 			outputFormat,
-			...(maxCost !== undefined && { maxCost }),
 			...(maxStringsPerJob !== undefined && { maxStringsPerJob }),
 			...(maxTotalStrings !== undefined && { maxTotalStrings }),
 			retryDelay,
+			sourceLanguage,
 			timeout,
 			localeFormat,
 			outputDir,
@@ -378,15 +368,12 @@ each target language.
 				jobs,
 				languages,
 				localeFormat,
-				...(maxCost !== undefined && { maxCost }),
 				...(maxStringsPerJob !== undefined && { maxStringsPerJob }),
 				...(maxTotalStrings !== undefined && { maxTotalStrings }),
 				outputDir,
 				outputFormat: usesJsonStdout ? "json" : outputFormat,
 				...(poFilePrefix !== undefined && { poFilePrefix }),
-				sourceLanguage:
-					this.flags["source-language"] ??
-					this.appConfig.source.sourceLanguage,
+				sourceLanguage,
 				verboseLevel,
 			},
 		};
@@ -444,7 +431,6 @@ each target language.
 		readonly jobs: number;
 		readonly languages: readonly string[];
 		readonly maxRetries: number;
-		readonly maxCost?: number;
 		readonly maxStringsPerJob?: number;
 		readonly maxTotalStrings?: number;
 		readonly localeFormat: TranslateSettingsSnapshot["output"]["localeFormat"];
@@ -455,6 +441,7 @@ each target language.
 		readonly potFilePath?: string;
 		readonly debugOutputFile?: string;
 		readonly retryDelay: number;
+		readonly sourceLanguage: string;
 		readonly timeout: number;
 	}): TranslateSettingsSnapshot {
 		const inputPoPath =
@@ -472,18 +459,23 @@ each target language.
 				forceTranslate:
 					this.flags["force-translate"] ??
 					this.appConfig.behavior.forceTranslate,
-				poHeaderTemplatePath: this.resolveRequiredConfigSourcedPath(
-					"behavior.poHeaderTemplatePath",
-					this.flags["po-header-template-path"] ??
-						this.appConfig.behavior.poHeaderTemplatePath,
-					this.flags["po-header-template-path"] !== undefined,
-				),
-				promptFilePath: this.resolveRequiredConfigSourcedPath(
-					"behavior.promptFilePath",
-					this.flags["prompt-file-path"] ??
-						this.appConfig.behavior.promptFilePath,
-					this.flags["prompt-file-path"] !== undefined,
-				),
+				...(() => {
+					const promptFilePath =
+						this.flags["prompt-file-path"] ??
+						this.appConfig.behavior.promptFilePath;
+
+					return promptFilePath === undefined
+						? {}
+						: {
+								promptFilePath:
+									this.resolveRequiredConfigSourcedPath(
+										"behavior.promptFilePath",
+										promptFilePath,
+										this.flags["prompt-file-path"] !==
+											undefined,
+									),
+							};
+				})(),
 				useDictionary:
 					this.flags["use-dictionary"] ??
 					this.appConfig.behavior.useDictionary,
@@ -501,9 +493,6 @@ each target language.
 					this.appConfig.debug.verboseLevel,
 			},
 			limits: {
-				...(resolved.maxCost !== undefined && {
-					maxCost: resolved.maxCost,
-				}),
 				...(resolved.maxStringsPerJob !== undefined && {
 					maxStringsPerJob: resolved.maxStringsPerJob,
 				}),
@@ -557,9 +546,7 @@ each target language.
 				...(resolved.potFilePath !== undefined && {
 					potFilePath: resolved.potFilePath,
 				}),
-				sourceLanguage:
-					this.flags["source-language"] ??
-					this.appConfig.source.sourceLanguage,
+				sourceLanguage: resolved.sourceLanguage,
 				targetLanguages: resolved.languages,
 			},
 		};
@@ -594,23 +581,26 @@ each target language.
 	}
 
 	private resolveTargetLanguages(): readonly string[] {
-		const languages =
+		const rawLanguages =
 			this.flags["target-languages"] ??
 			this.appConfig.source.targetLanguages;
-		const seenLanguages = new Set<string>();
-		const unsafeLanguage = languages.find(
+		const languages = normalizeLanguageValues(rawLanguages);
+		const unsafeIndex = languages.findIndex(
 			(language) => !isSafeLanguageValue(language),
 		);
 
-		if (unsafeLanguage !== undefined) {
+		if (unsafeIndex >= 0) {
+			const rawLanguage =
+				rawLanguages[unsafeIndex] ?? languages[unsafeIndex];
 			this.error(
 				`--target-languages includes unsafe value ${JSON.stringify(
-					unsafeLanguage,
+					rawLanguage,
 				)}. ${LANGUAGE_VALUE_ERROR}`,
 				{ exit: 1 },
 			);
 		}
 
+		const seenLanguages = new Set<string>();
 		const duplicateLanguage = languages.find((language) => {
 			if (seenLanguages.has(language)) return true;
 			seenLanguages.add(language);
@@ -628,6 +618,23 @@ each target language.
 		}
 
 		return languages;
+	}
+
+	private resolveSourceLanguage(): string {
+		const rawSourceLanguage =
+			this.flags["source-language"] ??
+			this.appConfig.source.sourceLanguage;
+		const sourceLanguage = normalizeLanguageValue(rawSourceLanguage);
+		if (!isSafeLanguageValue(sourceLanguage)) {
+			this.error(
+				`--source-language includes unsafe value ${JSON.stringify(
+					rawSourceLanguage,
+				)}. ${LANGUAGE_VALUE_ERROR}`,
+				{ exit: 1 },
+			);
+		}
+
+		return sourceLanguage;
 	}
 
 	private resolvePotFilePath(): string | undefined {
@@ -701,20 +708,5 @@ each target language.
 		if (value === undefined) return undefined;
 
 		return this.resolveBoundedInteger(value, flagName, bounds);
-	}
-
-	private resolveMaxCost(): number | undefined {
-		if (this.flags["max-cost"] === undefined)
-			return this.appConfig.limits.maxCost;
-
-		const maxCostInput = this.flags["max-cost"].trim();
-		const maxCost = Number(maxCostInput);
-		if (!Number.isFinite(maxCost) || maxCost < 0) {
-			this.error("--max-cost must be a non-negative number.", {
-				exit: 1,
-			});
-		}
-
-		return maxCost;
 	}
 }

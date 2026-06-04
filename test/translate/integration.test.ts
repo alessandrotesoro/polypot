@@ -4,7 +4,6 @@ import path from "node:path";
 import { expect } from "chai";
 import { po } from "gettext-parser";
 import { createPolypotSecrets } from "../../src/config/secrets.js";
-import { calculateOpenAICost } from "../../src/providers/openai/pricing.js";
 import type { OpenAITranslateBatchResult } from "../../src/providers/openai/translate.js";
 import {
 	type ExecuteTranslateOptions,
@@ -13,14 +12,6 @@ import {
 } from "../../src/translate/executor.js";
 
 const FIXTURE_DIR = path.resolve("test/fixtures/translate");
-
-function cost() {
-	return calculateOpenAICost({
-		completionTokens: 5,
-		model: "gpt-5.4-mini",
-		promptTokens: 10,
-	});
-}
 
 async function makeProject(): Promise<{
 	readonly cleanup: () => Promise<void>;
@@ -100,7 +91,6 @@ function translationFor(msgid: string, plural: boolean): readonly string[] {
 const fixtureTranslateBatch: TranslateBatchFunction = async (
 	options,
 ): Promise<OpenAITranslateBatchResult> => ({
-	cost: cost(),
 	debug: { messages: [] },
 	dryRun: false,
 	missingEntries: [],

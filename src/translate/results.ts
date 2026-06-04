@@ -1,4 +1,3 @@
-import type { OpenAICost } from "../providers/openai/pricing.js";
 import type { PotAnalysis } from "./pot.js";
 import type { TranslationValidationStats } from "./validation.js";
 
@@ -17,7 +16,6 @@ export type TranslationLanguageStatus =
 
 export type TranslationLanguageState =
 	| "completed"
-	| "cost_skipped"
 	| "dry_run"
 	| "execution_failed"
 	| "merge_failed"
@@ -29,9 +27,6 @@ export type TranslationLanguageState =
 
 export interface TranslationLanguageResult {
 	readonly batches: number;
-	readonly cost: OpenAICost;
-	readonly costKnown?: boolean;
-	readonly costUnavailableReason?: string;
 	readonly debug?: readonly TranslationBatchDebug[];
 	readonly failed: number;
 	readonly language: string;
@@ -39,9 +34,8 @@ export interface TranslationLanguageResult {
 	readonly outputFile: string;
 	readonly plannedStrings: number;
 	readonly skippedByExisting: number;
-	readonly skippedByCost: number;
 	readonly skippedByLimit: number;
-	readonly skipReason?: "abort-on-failure" | "cost-limit";
+	readonly skipReason?: "abort-on-failure";
 	readonly sourceStrings: number;
 	readonly state: TranslationLanguageState;
 	readonly status: TranslationLanguageStatus;
@@ -61,7 +55,6 @@ export interface TranslationBatchDebug {
 export interface TranslationRunTotals {
 	readonly failed: number;
 	readonly plannedStrings: number;
-	readonly skippedByCost: number;
 	readonly skippedByExisting: number;
 	readonly skippedByLimit: number;
 	readonly sourceStrings: number;
@@ -70,7 +63,6 @@ export interface TranslationRunTotals {
 
 export interface TranslationRunResult {
 	readonly analysis: PotAnalysis;
-	readonly cost: OpenAICost;
 	readonly results: readonly TranslationLanguageResult[];
 	readonly status: TranslationRunStatus;
 	readonly summary: string;

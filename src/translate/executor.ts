@@ -6,14 +6,6 @@ import {
 } from "../providers/openai/translate.js";
 import { buildTranslationBatchPlan, type TranslationBatch } from "./batches.js";
 import {
-	createTranslationBudgetLedger,
-	hasExceededBudget,
-	recordActualCost,
-	type TranslationBudgetLedger,
-	wouldExceedBudget,
-} from "./budget.js";
-import { addOpenAICosts, ZERO_OPENAI_COST } from "./cost.js";
-import {
 	createDictionaryMatcher,
 	type DictionaryLoadResult,
 	type DictionaryMatcher,
@@ -69,14 +61,6 @@ export type TranslationProgressEvent =
 	  }
 	| {
 			readonly batch: number;
-			readonly language: string;
-			readonly phase: "batch-skipped";
-			readonly reason: "cost-limit";
-			readonly skippedStrings: number;
-			readonly totalStrings: number;
-	  }
-	| {
-			readonly batch: number;
 			readonly failedStrings: number;
 			readonly language: string;
 			readonly phase: "batch-failed";
@@ -115,7 +99,6 @@ export interface ExecuteTranslateOptions {
 	readonly inputPoPath?: string;
 	readonly jobs: number;
 	readonly localeFormat: LocaleFormat;
-	readonly maxCost?: number;
 	readonly maxRetries: number;
 	readonly maxStringsPerJob?: number;
 	readonly maxTokens?: number;
@@ -124,7 +107,6 @@ export interface ExecuteTranslateOptions {
 	readonly model: string;
 	readonly outputDir: string;
 	readonly poFilePrefix?: string;
-	readonly poHeaderTemplatePath?: string;
 	readonly potFilePath: string;
 	readonly promptFilePath?: string;
 	readonly provider?: string;
@@ -144,9 +126,6 @@ export type TranslateBatchFunction = (
 	options: Parameters<typeof translateOpenAIBatch>[0],
 	createClient?: OpenAIClientFactory,
 ) => Promise<OpenAITranslateBatchResult>;
-
-const ZERO_COST = ZERO_OPENAI_COST;
-const addCosts = addOpenAICosts;
 
 function addValidationStats(
 	first: TranslationValidationStats,
@@ -207,7 +186,6 @@ function buildFailedLanguageResult(options: {
 }): TranslationLanguageResult {
 	return {
 		batches: 0,
-		cost: ZERO_COST,
 		error:
 			options.error instanceof Error
 				? options.error.message
@@ -218,7 +196,6 @@ function buildFailedLanguageResult(options: {
 		outputFile: buildOutputFile(options.executeOptions, options.language),
 		plannedStrings: 0,
 		skippedByExisting: 0,
-		skippedByCost: 0,
 		skippedByLimit: 0,
 		sourceStrings: 0,
 		state: "execution_failed",
@@ -232,14 +209,10 @@ function buildNotStartedLanguageResult(options: {
 	readonly document: PotDocument;
 	readonly executeOptions: ExecuteTranslateOptions;
 	readonly language: string;
-	readonly reason: "abort-on-failure" | "cost-limit";
+	readonly reason: "abort-on-failure";
 }): TranslationLanguageResult {
-	const skippedByCost =
-		options.reason === "cost-limit" ? options.document.entries.length : 0;
-
 	return {
 		batches: 0,
-		cost: ZERO_COST,
 		failed: 0,
 		language: options.language,
 		mergedFromExisting: 0,
@@ -247,7 +220,6 @@ function buildNotStartedLanguageResult(options: {
 		plannedStrings: 0,
 		skipReason: options.reason,
 		skippedByExisting: 0,
-		skippedByCost,
 		skippedByLimit: 0,
 		sourceStrings: options.document.entries.length,
 		state: "not_started",
@@ -275,14 +247,12 @@ function getInvalidEntryKeys(stats: TranslationValidationStats): Set<string> {
 function getLanguageState(options: {
 	readonly dryRun: boolean;
 	readonly failed: number;
-	readonly skippedByCost: number;
 	readonly status: TranslationLanguageStatus;
 	readonly translated: number;
 	readonly validation: TranslationValidationStats;
 }): TranslationLanguageState {
 	if (options.status === "skipped") return "no_work";
 	if (options.dryRun) return "dry_run";
-	if (options.skippedByCost > 0) return "cost_skipped";
 	if (getValidationIssueCount(options.validation) > 0) {
 		return "validation_failed";
 	}
@@ -326,24 +296,6 @@ function pushBatchDebug(options: {
 		targetLanguage: options.targetLanguage,
 	});
 	if (batchDebug !== undefined) options.debug.push(batchDebug);
-}
-
-function countBatchEntriesFrom(
-	batches: readonly TranslationBatch[],
-	batchNumber: number,
-): number {
-	return batches
-		.filter((batch) => batch.number >= batchNumber)
-		.reduce((total, batch) => total + batch.entries.length, 0);
-}
-
-function countBatchEntriesAfter(
-	batches: readonly TranslationBatch[],
-	batchNumber: number,
-): number {
-	return batches
-		.filter((batch) => batch.number > batchNumber)
-		.reduce((total, batch) => total + batch.entries.length, 0);
 }
 
 function emitBatchFailure(options: {
@@ -423,8 +375,6 @@ async function processProviderBatch(options: {
 	if (provider !== "openai") {
 		if (options.executeOptions.dryRun) {
 			return {
-				cost: ZERO_COST,
-				costKnown: false,
 				debug: { messages: [] },
 				dryRun: true,
 				missingEntries: options.batch.entries,
@@ -465,7 +415,6 @@ async function processProviderBatch(options: {
 
 async function processLanguage(options: {
 	readonly document: PotDocument;
-	readonly budgetLedger?: TranslationBudgetLedger;
 	readonly executeOptions: ExecuteTranslateOptions;
 	readonly language: string;
 	readonly mergeSource: ExistingPoMergeSource;
@@ -478,9 +427,6 @@ async function processLanguage(options: {
 	);
 	const outputDocument = await createPoOutputDocument({
 		document: options.document,
-		...(options.executeOptions.poHeaderTemplatePath !== undefined && {
-			poHeaderTemplatePath: options.executeOptions.poHeaderTemplatePath,
-		}),
 		targetLanguage: options.language,
 	});
 	let output = outputDocument.data;
@@ -506,7 +452,6 @@ async function processLanguage(options: {
 					: "Could not merge existing PO file.";
 			return {
 				batches: 0,
-				cost: ZERO_COST,
 				error: mergeError,
 				failed: options.document.entries.length,
 				language: options.language,
@@ -514,7 +459,6 @@ async function processLanguage(options: {
 				outputFile,
 				plannedStrings: 0,
 				skippedByExisting: 0,
-				skippedByCost: 0,
 				skippedByLimit: 0,
 				sourceStrings: options.document.entries.length,
 				state: "merge_failed",
@@ -536,14 +480,10 @@ async function processLanguage(options: {
 			maxStrings: options.maxStrings,
 		}),
 	});
-	let cost = ZERO_COST;
-	let costKnown = true;
-	let costUnavailableReason: string | undefined;
 	const debug: TranslationBatchDebug[] = [];
 	let failed = 0;
 	let failureMessage: string | undefined;
 	let processedForProgress = 0;
-	let skippedByCost = 0;
 	let translated = 0;
 	let validation = createEmptyValidationStats();
 
@@ -561,14 +501,12 @@ async function processLanguage(options: {
 
 		return {
 			batches: 0,
-			cost,
 			failed: 0,
 			language: options.language,
 			mergedFromExisting,
 			outputFile,
 			plannedStrings: 0,
 			skippedByExisting: batchPlan.skippedByExisting,
-			skippedByCost: 0,
 			skippedByLimit: batchPlan.skippedByLimit,
 			sourceStrings: batchPlan.sourceStrings,
 			state: "no_work",
@@ -619,75 +557,16 @@ async function processLanguage(options: {
 			}
 			processedForProgress += batch.entries.length;
 		} else {
-			const estimated = await processProviderBatch({
+			const result = await processProviderBatch({
 				batch,
 				dictionaryMatcher,
-				executeOptions: { ...options.executeOptions, dryRun: true },
+				executeOptions: options.executeOptions,
 				language: options.language,
 				pluralCount: outputDocument.pluralCount,
 				promptTemplate: promptTemplate.prompt,
 				translateBatch: options.translateBatch,
 			});
-			if (!estimated.ok) {
-				if (estimated.cost !== undefined) {
-					cost = addCosts(cost, estimated.cost);
-				}
-				failed += batch.entries.length;
-				processedForProgress += batch.entries.length;
-				failureMessage = estimated.error;
-				emitBatchFailure({
-					batch,
-					executeOptions: options.executeOptions,
-					language: options.language,
-					totalStrings: batchPlan.plannedStrings,
-				});
-				if (
-					options.executeOptions.abortOnFailure ||
-					options.executeOptions.skipLanguageOnFailure
-				) {
-					break;
-				}
-				continue;
-			}
-			const currentBudget = recordActualCost(
-				options.budgetLedger ??
-					createTranslationBudgetLedger(
-						options.executeOptions.maxCost,
-					),
-				cost,
-			);
-			if (wouldExceedBudget(currentBudget, estimated.cost)) {
-				const skippedStrings = countBatchEntriesFrom(
-					batchPlan.batches,
-					batch.number,
-				);
-				skippedByCost += skippedStrings;
-				options.executeOptions.onProgress?.({
-					batch: batch.number,
-					language: options.language,
-					phase: "batch-skipped",
-					reason: "cost-limit",
-					skippedStrings,
-					totalStrings: batchPlan.plannedStrings,
-				});
-				break;
-			}
-
-			const result = options.executeOptions.dryRun
-				? estimated
-				: await processProviderBatch({
-						batch,
-						dictionaryMatcher,
-						executeOptions: options.executeOptions,
-						language: options.language,
-						pluralCount: outputDocument.pluralCount,
-						promptTemplate: promptTemplate.prompt,
-						translateBatch: options.translateBatch,
-					});
 			if (!result.ok) {
-				if (result.cost !== undefined) {
-					cost = addCosts(cost, result.cost);
-				}
 				pushBatchDebug({
 					batch: batch.number,
 					debug,
@@ -722,17 +601,11 @@ async function processLanguage(options: {
 			});
 			const batchValidation =
 				result.validationStats ?? createEmptyValidationStats();
-			if (result.costKnown === false) {
-				costKnown = false;
-				costUnavailableReason =
-					"Provider-specific price estimate is unavailable.";
-			}
 			const issueCount = getValidationIssueCount(batchValidation);
 			const invalidEntryKeys = getInvalidEntryKeys(batchValidation);
 			const safeTranslations = result.translations.filter(
 				(translation) => !invalidEntryKeys.has(translation.entry.key),
 			);
-			cost = addCosts(cost, result.cost);
 			if (!options.executeOptions.dryRun) {
 				failed += result.missingEntries.length + invalidEntryKeys.size;
 			}
@@ -757,35 +630,6 @@ async function processLanguage(options: {
 				: safeTranslations.length +
 					result.missingEntries.length +
 					invalidEntryKeys.size;
-			if (
-				!options.executeOptions.dryRun &&
-				hasExceededBudget(
-					recordActualCost(
-						options.budgetLedger ??
-							createTranslationBudgetLedger(
-								options.executeOptions.maxCost,
-							),
-						cost,
-					),
-				)
-			) {
-				const skippedStrings = countBatchEntriesAfter(
-					batchPlan.batches,
-					batch.number,
-				);
-				skippedByCost += skippedStrings;
-				if (skippedStrings > 0) {
-					options.executeOptions.onProgress?.({
-						batch: batch.number,
-						language: options.language,
-						phase: "batch-skipped",
-						reason: "cost-limit",
-						skippedStrings,
-						totalStrings: batchPlan.plannedStrings,
-					});
-				}
-				break;
-			}
 			if (issueCount > 0) {
 				options.executeOptions.onProgress?.({
 					issues: issueCount,
@@ -806,7 +650,7 @@ async function processLanguage(options: {
 
 	const status: TranslationLanguageStatus = options.executeOptions.dryRun
 		? "dry-run"
-		: failed > 0 || skippedByCost > 0
+		: failed > 0
 			? "failed"
 			: "completed";
 
@@ -818,20 +662,17 @@ async function processLanguage(options: {
 
 	return {
 		batches: batchPlan.batches.length,
-		cost,
 		failed,
 		language: options.language,
 		mergedFromExisting,
 		outputFile,
 		plannedStrings: batchPlan.plannedStrings,
 		skippedByExisting: batchPlan.skippedByExisting,
-		skippedByCost,
 		skippedByLimit: batchPlan.skippedByLimit,
 		sourceStrings: batchPlan.sourceStrings,
 		state: getLanguageState({
 			dryRun: options.executeOptions.dryRun,
 			failed,
-			skippedByCost,
 			status,
 			translated,
 			validation,
@@ -839,21 +680,12 @@ async function processLanguage(options: {
 		status,
 		translated,
 		validation,
-		...(costKnown ? {} : { costKnown: false }),
-		...(costUnavailableReason !== undefined && {
-			costUnavailableReason,
-		}),
 		...(debug.length > 0 && { debug }),
 		...(failureMessage !== undefined && { error: failureMessage }),
-		...(outputDocument.headerTemplate.warning !== undefined ||
-		promptTemplate.warning !== undefined ||
+		...(promptTemplate.warning !== undefined ||
 		dictionary.warning !== undefined
 			? {
-					warning: [
-						outputDocument.headerTemplate.warning,
-						promptTemplate.warning,
-						dictionary.warning,
-					]
+					warning: [promptTemplate.warning, dictionary.warning]
 						.filter(
 							(warning): warning is string =>
 								warning !== undefined,
@@ -902,7 +734,6 @@ function buildTotals(
 		(totals, result) => ({
 			failed: totals.failed + result.failed,
 			plannedStrings: totals.plannedStrings + result.plannedStrings,
-			skippedByCost: totals.skippedByCost + result.skippedByCost,
 			skippedByExisting:
 				totals.skippedByExisting + result.skippedByExisting,
 			skippedByLimit: totals.skippedByLimit + result.skippedByLimit,
@@ -912,7 +743,6 @@ function buildTotals(
 		{
 			failed: 0,
 			plannedStrings: 0,
-			skippedByCost: 0,
 			skippedByExisting: 0,
 			skippedByLimit: 0,
 			sourceStrings: 0,
@@ -935,7 +765,6 @@ function canProcessLanguagesConcurrently(
 ): boolean {
 	return (
 		options.jobs > 1 &&
-		options.maxCost === undefined &&
 		options.maxTotalStrings === undefined &&
 		!options.abortOnFailure
 	);
@@ -1009,9 +838,6 @@ async function processLanguagesSequentially(options: {
 	let remainingStrings =
 		options.executeOptions.maxTotalStrings ?? Number.POSITIVE_INFINITY;
 	const results: TranslationLanguageResult[] = [];
-	let budgetLedger = createTranslationBudgetLedger(
-		options.executeOptions.maxCost,
-	);
 
 	for (
 		let languageIndex = 0;
@@ -1029,7 +855,6 @@ async function processLanguagesSequentially(options: {
 			options.executeOptions.maxStringsPerJob ?? Number.POSITIVE_INFINITY,
 		);
 		const result = await processLanguage({
-			budgetLedger,
 			document: options.document,
 			executeOptions: options.executeOptions,
 			language,
@@ -1048,15 +873,12 @@ async function processLanguagesSequentially(options: {
 			}),
 		);
 		results.push(result);
-		budgetLedger = recordActualCost(budgetLedger, result.cost);
 		remainingStrings -= result.plannedStrings;
 
 		const stopReason =
 			options.executeOptions.abortOnFailure && result.status === "failed"
 				? "abort-on-failure"
-				: result.skippedByCost > 0
-					? "cost-limit"
-					: undefined;
+				: undefined;
 		if (stopReason !== undefined) {
 			for (
 				let skippedIndex = languageIndex + 1;
@@ -1127,16 +949,10 @@ export async function executeTranslate(
 				mergeSources,
 				translateBatch,
 			});
-	const cost = results.reduce(
-		(total, result) => addCosts(total, result.cost),
-		ZERO_COST,
-	);
-
 	const status = getRunStatus(results, options.dryRun);
 
 	return {
 		analysis: document.analysis,
-		cost,
 		results,
 		status,
 		summary: buildSummary(results, status),

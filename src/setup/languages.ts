@@ -120,9 +120,237 @@ export const SETUP_LANGUAGES: readonly SetupLanguage[] = [
 	{ value: "zu_ZA", label: "Zulu" },
 ] as const;
 
+const DEFAULT_LOCALE_BY_BASE: Readonly<Record<string, string>> = {
+	af: "af_ZA",
+	ar: "ar_AR",
+	az: "az_AZ",
+	be: "be_BY",
+	bg: "bg_BG",
+	bn: "bn_BD",
+	bs: "bs_BA",
+	ca: "ca_ES",
+	cs: "cs_CZ",
+	cy: "cy_GB",
+	da: "da_DK",
+	de: "de_DE",
+	el: "el_GR",
+	en: "en_US",
+	es: "es_ES",
+	et: "et_EE",
+	eu: "eu_ES",
+	fa: "fa_IR",
+	fi: "fi_FI",
+	fr: "fr_FR",
+	fy: "fy_NL",
+	ga: "ga_IE",
+	gd: "gd_GB",
+	gl: "gl_ES",
+	gu: "gu_IN",
+	he: "he_IL",
+	hi: "hi_IN",
+	hr: "hr_HR",
+	hu: "hu_HU",
+	hy: "hy_AM",
+	id: "id_ID",
+	is: "is_IS",
+	it: "it_IT",
+	ja: "ja_JP",
+	ka: "ka_GE",
+	kk: "kk_KZ",
+	km: "km_KH",
+	kn: "kn_IN",
+	ko: "ko_KR",
+	ky: "ky_KG",
+	lb: "lb_LU",
+	lo: "lo_LA",
+	lt: "lt_LT",
+	lv: "lv_LV",
+	mg: "mg_MG",
+	mk: "mk_MK",
+	ml: "ml_IN",
+	mn: "mn_MN",
+	mr: "mr_IN",
+	ms: "ms_MY",
+	mt: "mt_MT",
+	my: "my_MM",
+	nb: "nb_NO",
+	ne: "ne_NP",
+	nl: "nl_NL",
+	nn: "nn_NO",
+	no: "no_NO",
+	or: "or_IN",
+	pa: "pa_IN",
+	pl: "pl_PL",
+	pt: "pt_PT",
+	ro: "ro_RO",
+	ru: "ru_RU",
+	sa: "sa_IN",
+	sd: "sd_PK",
+	sk: "sk_SK",
+	sl: "sl_SI",
+	sq: "sq_AL",
+	sr: "sr_RS",
+	sv: "sv_SE",
+	sw: "sw_KE",
+	ta: "ta_IN",
+	te: "te_IN",
+	tg: "tg_TJ",
+	th: "th_TH",
+	tr: "tr_TR",
+	uk: "uk_UA",
+	ur: "ur_PK",
+	uz: "uz_UZ",
+	vi: "vi_VN",
+	yo: "yo_NG",
+	zh: "zh_CN",
+	zu: "zu_ZA",
+};
+
+const ISO_639_2_BY_BASE: Readonly<Record<string, string>> = {
+	af: "afr",
+	ak: "aka",
+	am: "amh",
+	ar: "ara",
+	az: "aze",
+	be: "bel",
+	bg: "bul",
+	bn: "ben",
+	bs: "bos",
+	ca: "cat",
+	cs: "ces",
+	cy: "cym",
+	da: "dan",
+	de: "deu",
+	el: "ell",
+	en: "eng",
+	es: "spa",
+	et: "est",
+	eu: "eus",
+	fa: "fas",
+	fi: "fin",
+	fr: "fra",
+	ga: "gle",
+	gd: "gla",
+	gl: "glg",
+	gu: "guj",
+	he: "heb",
+	hi: "hin",
+	hr: "hrv",
+	hu: "hun",
+	hy: "hye",
+	id: "ind",
+	is: "isl",
+	it: "ita",
+	ja: "jpn",
+	ka: "kat",
+	kk: "kaz",
+	km: "khm",
+	kn: "kan",
+	ko: "kor",
+	ky: "kir",
+	lb: "ltz",
+	lo: "lao",
+	lt: "lit",
+	lv: "lav",
+	mg: "mlg",
+	mk: "mkd",
+	ml: "mal",
+	mn: "mon",
+	mr: "mar",
+	ms: "msa",
+	mt: "mlt",
+	my: "mya",
+	nb: "nob",
+	ne: "nep",
+	nl: "nld",
+	nn: "nno",
+	no: "nor",
+	or: "ori",
+	pa: "pan",
+	pl: "pol",
+	pt: "por",
+	ro: "ron",
+	ru: "rus",
+	sa: "san",
+	sd: "snd",
+	sk: "slk",
+	sl: "slv",
+	sq: "sqi",
+	sr: "srp",
+	sv: "swe",
+	sw: "swa",
+	ta: "tam",
+	te: "tel",
+	tg: "tgk",
+	th: "tha",
+	tr: "tur",
+	uk: "ukr",
+	ur: "urd",
+	uz: "uzb",
+	vi: "vie",
+	yo: "yor",
+	zh: "zho",
+	zu: "zul",
+};
+
 const languageByValue = new Map(
 	SETUP_LANGUAGES.map((language) => [language.value, language]),
 );
+
+function aliasKey(value: string): string {
+	return value.trim().toLowerCase().replaceAll("_", "-");
+}
+
+function addAlias(
+	aliases: Map<string, string>,
+	alias: string | undefined,
+	canonical: string,
+): void {
+	if (alias === undefined || alias.trim().length === 0) return;
+	const key = aliasKey(alias);
+	if (!aliases.has(key)) aliases.set(key, canonical);
+}
+
+function baseLanguage(value: string): string {
+	return value.split("_")[0] ?? value;
+}
+
+function labelWithoutRegion(label: string): string {
+	return label.replace(/\s+\([^)]*\)$/u, "");
+}
+
+function buildLanguageAliases(): ReadonlyMap<string, string> {
+	const aliases = new Map<string, string>();
+
+	for (const language of SETUP_LANGUAGES) {
+		const base = baseLanguage(language.value);
+		const defaultLocale = DEFAULT_LOCALE_BY_BASE[base] ?? language.value;
+
+		addAlias(aliases, language.value, language.value);
+		addAlias(aliases, language.value.replaceAll("_", "-"), language.value);
+		addAlias(aliases, language.label, language.value);
+		addAlias(aliases, labelWithoutRegion(language.label), defaultLocale);
+		addAlias(aliases, base, defaultLocale);
+		addAlias(aliases, ISO_639_2_BY_BASE[base], defaultLocale);
+	}
+
+	return aliases;
+}
+
+const languageAliases = buildLanguageAliases();
+
+export function normalizeSetupLanguageInput(value: string): string {
+	const trimmed = value.trim();
+	const canonical = languageAliases.get(aliasKey(trimmed));
+
+	return canonical ?? trimmed;
+}
+
+export function normalizeSetupLanguageValues(
+	values: readonly string[],
+): string[] {
+	return values.map(normalizeSetupLanguageInput);
+}
 
 /**
  * Trim locale values and drop blanks.
@@ -132,7 +360,7 @@ const languageByValue = new Map(
  */
 function normalizedValues(values: readonly string[]): string[] {
 	return values
-		.map((value) => value.trim())
+		.map(normalizeSetupLanguageInput)
 		.filter((value) => value.length > 0);
 }
 
@@ -143,10 +371,17 @@ function normalizedValues(values: readonly string[]): string[] {
  * @returns Formatted locale label.
  */
 export function formatSetupLanguage(value: string): string {
-	const language = languageByValue.get(value);
+	const normalized = normalizeSetupLanguageInput(value);
+	const language = languageByValue.get(normalized);
 	return language === undefined
-		? `${value} (custom)`
+		? `${normalized} (custom)`
 		: `${language.label} (${language.value})`;
+}
+
+export function getSetupLanguageDisplayName(value: string): string {
+	const normalized = normalizeSetupLanguageInput(value);
+
+	return languageByValue.get(normalized)?.label ?? normalized;
 }
 
 /**

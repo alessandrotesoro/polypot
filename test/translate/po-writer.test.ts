@@ -85,7 +85,7 @@ describe("PO writer", () => {
 
 			expect(output.pluralCount).to.equal(1);
 			expect(output.data.headers).to.deep.include({
-				Language: "ja",
+				Language: "ja-JP",
 				"Plural-Forms": "nplurals=1; plural=0;",
 			});
 			expect(pluralEntry).to.deep.equal([""]);

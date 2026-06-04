@@ -1,6 +1,10 @@
 import type { PolypotConfig, PolypotConfigInput } from "../config/schema.js";
 import type { PolypotSecrets } from "../config/secrets.js";
 import {
+	normalizeLanguageValue,
+	normalizeLanguageValues,
+} from "../language-values.js";
+import {
 	currentPromptAdapter,
 	messageWithDefault,
 	type PromptAdapter,
@@ -15,11 +19,13 @@ export interface InitAnswers {
 	readonly targetLanguages: readonly string[];
 	readonly potFilePath?: string;
 	readonly outputDir?: string;
+	readonly promptFilePath: string;
 }
 
 export type InitPromptAdapter = PromptAdapter;
 
 const INIT_PROMPT_ADAPTER = Symbol.for("polypot.initPromptAdapter");
+export const DEFAULT_PROJECT_PROMPT_FILE_PATH = ".polypot/prompt.md";
 
 function omitKeys<T extends object, K extends keyof T>(
 	value: T | undefined,
@@ -64,7 +70,8 @@ export function buildInitConfig(
 	answers: InitAnswers,
 ): PolypotConfigInput {
 	const existing = existingConfig ?? {};
-	const configBase = omitKeys(existing, ["output", "source"]);
+	const configBase = omitKeys(existing, ["behavior", "output", "source"]);
+	const behaviorBase = existing.behavior ?? {};
 	const sourceBase = omitKeys(existing.source, ["potFilePath"]);
 	const outputBase = omitKeys(existing.output, ["outputDir"]);
 	const output =
@@ -79,13 +86,19 @@ export function buildInitConfig(
 
 	return {
 		...configBase,
+		behavior: {
+			...behaviorBase,
+			promptFilePath: answers.promptFilePath,
+		},
 		source: {
 			...sourceBase,
 			...(answers.potFilePath !== undefined && {
 				potFilePath: answers.potFilePath,
 			}),
-			sourceLanguage: answers.sourceLanguage,
-			targetLanguages: [...answers.targetLanguages],
+			sourceLanguage: normalizeLanguageValue(answers.sourceLanguage),
+			targetLanguages: [
+				...normalizeLanguageValues(answers.targetLanguages),
+			],
 		},
 		...(output !== undefined && { output }),
 	};
@@ -99,6 +112,9 @@ export function buildInitConfig(
  */
 export function defaultInitAnswers(existingConfig: PolypotConfig): InitAnswers {
 	return {
+		promptFilePath:
+			existingConfig.behavior.promptFilePath ??
+			DEFAULT_PROJECT_PROMPT_FILE_PATH,
 		sourceLanguage: existingConfig.source.sourceLanguage,
 		targetLanguages: existingConfig.source.targetLanguages,
 		...(existingConfig.source.potFilePath !== undefined && {
@@ -163,6 +179,9 @@ export async function collectInitAnswers(
 		}),
 		...(outputDir !== undefined && { outputDir }),
 		...(potFilePath !== undefined && { potFilePath }),
+		promptFilePath:
+			existingConfig.behavior.promptFilePath ??
+			DEFAULT_PROJECT_PROMPT_FILE_PATH,
 		sourceLanguage: languages.sourceLanguage,
 		targetLanguages: languages.targetLanguages,
 	};

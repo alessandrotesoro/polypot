@@ -1,3 +1,9 @@
+import {
+	getSetupLanguageDisplayName,
+	normalizeSetupLanguageInput,
+	normalizeSetupLanguageValues,
+} from "./setup/languages.js";
+
 const PATH_LIKE_LANGUAGE_PATTERN = /[\\/]|(^[a-zA-Z]:)|\.\./;
 
 export const LANGUAGE_VALUE_ERROR =
@@ -15,8 +21,21 @@ export function isSafeLanguageValue(value: string): boolean {
 
 	return (
 		normalized.length > 0 &&
-		normalized === value &&
 		!hasControlCharacter(normalized) &&
 		!PATH_LIKE_LANGUAGE_PATTERN.test(normalized)
 	);
+}
+
+export function normalizeLanguageValue(value: string): string {
+	return normalizeSetupLanguageInput(value);
+}
+
+export function normalizeLanguageValues(
+	values: readonly string[],
+): readonly string[] {
+	return normalizeSetupLanguageValues(values);
+}
+
+export function getLanguageDisplayName(value: string): string {
+	return getSetupLanguageDisplayName(value);
 }

@@ -1,5 +1,4 @@
 import { expect } from "chai";
-import { knownTranslationEstimate } from "../../src/translate/cost.js";
 import type { PotAnalysis } from "../../src/translate/pot.js";
 import { buildTranslateWorkload } from "../../src/translate/workload.js";
 
@@ -35,11 +34,9 @@ describe("buildTranslateWorkload", () => {
 
 		expect(workload.languages).to.deep.include({
 			batches: 1,
-			estimate: workload.languages[0]?.estimate,
 			language: "fr_FR",
 			outputFile: "languages/fr_FR.po",
 			plannedStrings: 2,
-			skippedByCost: 0,
 			skippedByLimit: 2,
 			sourceStrings: 4,
 		});
@@ -65,32 +62,6 @@ describe("buildTranslateWorkload", () => {
 		expect(
 			workload.languages.map((language) => language.skippedByLimit),
 		).to.deep.equal([0, 3]);
-	});
-
-	it("applies the cost limit across languages", () => {
-		const workload = buildTranslateWorkload(
-			{
-				batchSize: 20,
-				estimateCost: (sourceCharacters) =>
-					knownTranslationEstimate({
-						cost: sourceCharacters / 1_000_000,
-						inputTokens: sourceCharacters,
-						outputTokens: 0,
-					}),
-				languages: ["fr_FR", "es_ES"],
-				localeFormat: "target_lang",
-				maxCost: 0.0012,
-				outputDir: "languages",
-			},
-			buildAnalysis([1000, 1000, 1000, 1000]),
-		);
-
-		expect(
-			workload.languages.map((language) => language.plannedStrings),
-		).to.deep.equal([1, 0]);
-		expect(
-			workload.languages.map((language) => language.skippedByCost),
-		).to.deep.equal([3, 4]);
 	});
 
 	it("formats output filenames with the requested locale format", () => {

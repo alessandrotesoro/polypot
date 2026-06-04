@@ -17,12 +17,6 @@ import {
 	type ParsedTranslation,
 	parseXmlResponse,
 } from "../../translate/xml.js";
-import {
-	calculateOpenAICost,
-	estimateCompletionTokens,
-	estimateTokenCount,
-	type OpenAICost,
-} from "./pricing.js";
 
 export interface OpenAITranslationClient {
 	readonly chat: {
@@ -54,8 +48,6 @@ export type OpenAIClientFactory = (options: {
 
 export type OpenAITranslateBatchResult =
 	| {
-			readonly cost: OpenAICost;
-			readonly costKnown?: boolean;
 			readonly debug: {
 				readonly messages: readonly ChatCompletionMessageParam[];
 				readonly response?: string;
@@ -67,7 +59,6 @@ export type OpenAITranslateBatchResult =
 			readonly validationStats: TranslationValidationStats;
 	  }
 	| {
-			readonly cost?: OpenAICost;
 			readonly debug?: {
 				readonly messages: readonly ChatCompletionMessageParam[];
 				readonly response?: string;
@@ -143,37 +134,6 @@ function buildMessages(
 	return messages;
 }
 
-function estimateMessagesCost(
-	messages: readonly ChatCompletionMessageParam[],
-	model: string,
-): OpenAICost {
-	const promptTokens = estimateTokenCount(
-		messages.map((message) => String(message.content ?? "")).join("\n"),
-	);
-
-	return calculateOpenAICost({
-		completionTokens: estimateCompletionTokens(promptTokens),
-		model,
-		promptTokens,
-	});
-}
-
-function calculateUsageCost(
-	usage: OpenAIChatCompletionResponse["usage"],
-	model: string,
-	fallbackCost: OpenAICost,
-): OpenAICost {
-	const promptTokens = usage?.prompt_tokens ?? fallbackCost.promptTokens;
-	const completionTokens =
-		usage?.completion_tokens ?? fallbackCost.completionTokens;
-
-	return calculateOpenAICost({
-		completionTokens,
-		model,
-		promptTokens,
-	});
-}
-
 function getErrorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
 }
@@ -198,7 +158,6 @@ function getValidationIssueCount(stats: TranslationValidationStats): number {
 class SemanticTranslationError extends Error {
 	public constructor(
 		message: string,
-		public readonly cost: OpenAICost,
 		public readonly response: string,
 	) {
 		super(message);
@@ -250,11 +209,9 @@ export async function translateOpenAIBatch(
 	createClient: OpenAIClientFactory = defaultClientFactory,
 ): Promise<OpenAITranslateBatchResult> {
 	const messages = buildMessages(options);
-	const estimatedCost = estimateMessagesCost(messages, options.model);
 
 	if (options.dryRun) {
 		return {
-			cost: estimatedCost,
 			debug: { messages },
 			dryRun: true,
 			missingEntries: options.entries,
@@ -277,7 +234,6 @@ export async function translateOpenAIBatch(
 		apiKey: options.apiKey,
 		timeoutMs: options.timeoutSeconds * 1000,
 	});
-	let attemptCost: OpenAICost | undefined;
 	let lastError: unknown;
 	let lastResponse: string | undefined;
 
@@ -290,37 +246,6 @@ export async function translateOpenAIBatch(
 			);
 			const content = response.choices[0]?.message.content ?? "";
 			lastResponse = content;
-			const responseCost = calculateUsageCost(
-				response.usage,
-				options.model,
-				estimatedCost,
-			);
-			attemptCost =
-				attemptCost === undefined
-					? responseCost
-					: {
-							completionCost:
-								attemptCost.completionCost +
-								responseCost.completionCost,
-							completionTokens:
-								attemptCost.completionTokens +
-								responseCost.completionTokens,
-							fallbackPricing:
-								attemptCost.fallbackPricing ||
-								responseCost.fallbackPricing,
-							model: responseCost.model,
-							promptCost:
-								attemptCost.promptCost +
-								responseCost.promptCost,
-							promptTokens:
-								attemptCost.promptTokens +
-								responseCost.promptTokens,
-							totalCost:
-								attemptCost.totalCost + responseCost.totalCost,
-							totalTokens:
-								attemptCost.totalTokens +
-								responseCost.totalTokens,
-						};
 			const parsed = parseXmlResponse({
 				dictionaryCount: options.dictionaryMatches?.length ?? 0,
 				entries: options.entries,
@@ -342,13 +267,11 @@ export async function translateOpenAIBatch(
 			if (semanticIssueCount > 0 && !hasUsableTranslation) {
 				throw new SemanticTranslationError(
 					`Model response did not satisfy the translation contract (${semanticIssueCount} issue${semanticIssueCount === 1 ? "" : "s"}).`,
-					responseCost,
 					content,
 				);
 			}
 
 			return {
-				cost: attemptCost ?? responseCost,
 				debug: { messages, response: content },
 				dryRun: false,
 				missingEntries: parsed.missingEntries,
@@ -366,7 +289,6 @@ export async function translateOpenAIBatch(
 	}
 
 	return {
-		...(attemptCost !== undefined && { cost: attemptCost }),
 		debug: {
 			messages,
 			...(lastResponse !== undefined && { response: lastResponse }),
