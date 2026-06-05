@@ -66,7 +66,7 @@ describe("polypot setup", () => {
 			expect(error).to.equal(undefined);
 			expect(stdout).to.include("global config:");
 			expect(stdout).to.include("config.yaml");
-			expect(stdout).to.include("OPENAI_API_KEY: missing");
+			expect(stdout).to.include("global OPENAI_API_KEY: missing");
 		});
 	});
 
@@ -93,7 +93,7 @@ describe("polypot setup", () => {
 			const { stdout, error } = await runCommand(["setup", "--show"]);
 
 			expect(error).to.equal(undefined);
-			expect(stdout).to.include("OPENAI_API_KEY: present");
+			expect(stdout).to.include("global OPENAI_API_KEY: present");
 			expect(stdout).to.include("custom-model");
 			expect(stdout).to.not.include("sk-test-secret");
 		});
@@ -130,7 +130,7 @@ describe("polypot setup", () => {
 
 			expect(error).to.equal(undefined);
 			expect(stdout).to.include("Global Polypot setup saved.");
-			expect(stdout).to.include("OPENAI_API_KEY: present");
+			expect(stdout).to.include("global OPENAI_API_KEY: present");
 			expect(stdout).to.not.include("sk-command-secret");
 			expect(runtime.config.provider.model).to.equal(
 				DEFAULT_OPENAI_MODEL,

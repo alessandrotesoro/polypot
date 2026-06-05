@@ -1,11 +1,12 @@
 import type { PotEntry } from "./pot.js";
 
 const PRINTF_PLACEHOLDER_PATTERN =
-	/%(?:\d+\$)?[-+0 '#]*(?:\*|\d+)?(?:\.(?:\*|\d+))?[bcdeEfFgGosuxX]/g;
+	/%(?:\d+\$)?[-+0 '#]*(?:\*|\d+)?(?:\.(?:\*|\d+))?[bcdeEfFgGosuxX](?![A-Za-z])/g;
 const NUMERIC_PLACEHOLDER_PATTERN =
 	/^%(?:\d+\$)?[-+0 '#]*(?:\*|\d+)?(?:\.(?:\*|\d+))?[dfueEfFgGuxX]$/;
 const TAG_TOKEN_PATTERN = /<\/?[A-Za-z][A-Za-z0-9:-]*(?:\s+[^<>]*?)?\/?>/g;
-const SHORTCODE_TOKEN_PATTERN = /\[\/?[A-Za-z][A-Za-z0-9_:-]*(?:\s+[^\]]*)?\]/g;
+const SHORTCODE_TOKEN_PATTERN =
+	/\[(?:\/[A-Za-z][A-Za-z0-9_:-]*|[A-Za-z][A-Za-z0-9_:-]*(?:(?:\s+[^\]\s=]+=(?:"[^"]*"|'[^']*'|[^\]\s]+))*\s*\/?)?)\]/g;
 
 export interface ProtectedTokens {
 	readonly printf: readonly string[];

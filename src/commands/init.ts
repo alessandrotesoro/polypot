@@ -29,7 +29,7 @@ interface InitResult {
 	readonly status: "cancelled" | "saved";
 	readonly projectConfig: string;
 	readonly projectSecrets: string;
-	readonly openaiApiKey: "missing" | "present";
+	readonly projectOpenaiApiKey: "missing" | "present";
 	readonly gitignore: "skipped" | ".polypot/.env";
 }
 
@@ -145,7 +145,7 @@ are added to .gitignore by default.
 			if (flags.yes || !(await confirmInitUpdate())) {
 				const result = this.buildResult({
 					gitignore: flags.gitignore,
-					hasApiKey: (await readProjectSecrets(storeOptions))
+					hasProjectApiKey: (await readProjectSecrets(storeOptions))
 						.hasOpenaiApiKey,
 					paths,
 					status: "cancelled",
@@ -182,12 +182,12 @@ are added to .gitignore by default.
 				secrets: { openaiApiKey: answers.openaiApiKey },
 			});
 		}
-		const hasApiKey =
+		const hasProjectApiKey =
 			answers.openaiApiKey !== undefined ||
 			existingSecrets.hasOpenaiApiKey;
 		const result = this.buildResult({
 			gitignore: flags.gitignore,
-			hasApiKey,
+			hasProjectApiKey,
 			paths,
 			status: "saved",
 		});
@@ -232,13 +232,15 @@ are added to .gitignore by default.
 
 	private buildResult(options: {
 		readonly gitignore: boolean;
-		readonly hasApiKey: boolean;
+		readonly hasProjectApiKey: boolean;
 		readonly paths: ReturnType<typeof resolveConfigPaths>;
 		readonly status: InitResult["status"];
 	}): InitResult {
 		return {
 			gitignore: options.gitignore ? ".polypot/.env" : "skipped",
-			openaiApiKey: options.hasApiKey ? "present" : "missing",
+			projectOpenaiApiKey: options.hasProjectApiKey
+				? "present"
+				: "missing",
 			projectConfig: options.paths.projectYaml,
 			projectSecrets: options.paths.projectEnv,
 			status: options.status,
@@ -275,7 +277,7 @@ are added to .gitignore by default.
 		this.log(message);
 		this.log(`project config: ${result.projectConfig}`);
 		this.log(`project secrets: ${result.projectSecrets}`);
-		this.log(`OPENAI_API_KEY: ${result.openaiApiKey}`);
+		this.log(`project OPENAI_API_KEY: ${result.projectOpenaiApiKey}`);
 		if (result.gitignore !== "skipped")
 			this.log(`gitignore: ${result.gitignore}`);
 	}

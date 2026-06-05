@@ -107,7 +107,7 @@ describe("polypot init", () => {
 
 			expect(error).to.equal(undefined);
 			expect(stdout).to.include("Project Polypot config saved.");
-			expect(stdout).to.include("OPENAI_API_KEY: missing");
+			expect(stdout).to.include("project OPENAI_API_KEY: missing");
 			expect(fs.existsSync(path.join(projectDir, ".polypot"))).to.equal(
 				true,
 			);
@@ -192,7 +192,7 @@ describe("polypot init", () => {
 			);
 
 			expect(error).to.equal(undefined);
-			expect(stdout).to.include("OPENAI_API_KEY: present");
+			expect(stdout).to.include("project OPENAI_API_KEY: present");
 			expect(stdout).to.not.include("sk-project-secret");
 			expect(config.source.sourceLanguage).to.equal("it_IT");
 			expect(config.source.targetLanguages).to.deep.equal([
@@ -221,7 +221,7 @@ describe("polypot init", () => {
 				readonly status: string;
 				readonly projectConfig: string;
 				readonly projectSecrets: string;
-				readonly openaiApiKey: string;
+				readonly projectOpenaiApiKey: string;
 				readonly gitignore: string;
 			};
 
@@ -233,7 +233,7 @@ describe("polypot init", () => {
 			expect(result.projectSecrets).to.equal(
 				path.join(projectDir, ".polypot", ".env"),
 			);
-			expect(result.openaiApiKey).to.equal("missing");
+			expect(result.projectOpenaiApiKey).to.equal("missing");
 			expect(result.gitignore).to.equal(".polypot/.env");
 		} finally {
 			removeTempProjectDir(projectDir);
@@ -263,13 +263,13 @@ describe("polypot init", () => {
 			]);
 			const result = JSON.parse(stdout) as {
 				readonly status: string;
-				readonly openaiApiKey: string;
+				readonly projectOpenaiApiKey: string;
 				readonly gitignore: string;
 			};
 
 			expect(error).to.equal(undefined);
 			expect(result.status).to.equal("cancelled");
-			expect(result.openaiApiKey).to.equal("present");
+			expect(result.projectOpenaiApiKey).to.equal("present");
 			expect(result.gitignore).to.equal(".polypot/.env");
 			expect(fs.readFileSync(configPath, "utf8")).to.equal(beforeConfig);
 			expect(fs.readFileSync(envPath, "utf8")).to.equal(beforeEnv);
@@ -304,7 +304,7 @@ describe("polypot init", () => {
 			);
 
 			expect(error).to.equal(undefined);
-			expect(stdout).to.include("OPENAI_API_KEY: present");
+			expect(stdout).to.include("project OPENAI_API_KEY: present");
 			expect(stdout).to.not.include("sk-project-secret");
 			expect(config.source.sourceLanguage).to.equal("en_US");
 			expect(config.source.targetLanguages).to.deep.equal([
@@ -343,7 +343,9 @@ describe("polypot init", () => {
 					);
 
 					expect(error).to.equal(undefined);
-					expect(stdout).to.include("OPENAI_API_KEY: present");
+					expect(stdout).to.include(
+						"project OPENAI_API_KEY: present",
+					);
 					expect(stdout).to.not.include("sk-project-env-secret");
 					expect(config.source.sourceLanguage).to.equal("it_IT");
 					expect(config.source.targetLanguages).to.deep.equal([

@@ -1141,6 +1141,7 @@ msgstr[1] "%d fichiers"
 			"-p",
 			"foo.pot",
 			"--dry-run",
+			"--no-config",
 		]);
 
 		expect(error).to.equal(undefined);
@@ -1154,6 +1155,7 @@ msgstr[1] "%d fichiers"
 			"-p",
 			"foo.pot",
 			"--dry-run",
+			"--no-config",
 		]);
 		const result = JSON.parse(stdout) as {
 			readonly error: {

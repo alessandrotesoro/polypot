@@ -35,6 +35,12 @@ describe("translation validation", () => {
 		]);
 	});
 
+	it("does not treat natural percentage text as a printf placeholder", () => {
+		expect(
+			extractPlaceholders("Renew now for 20% discount."),
+		).to.deep.equal([]);
+	});
+
 	it("keeps translations with matching placeholders", () => {
 		const result = validateEntryTranslation({
 			entry: entry("Hello %s"),
@@ -132,6 +138,30 @@ describe("translation validation", () => {
 		const result = validateEntryTranslation({
 			entry: entry("[link]View[/link] [count]"),
 			msgstr: ["Voir"],
+			pluralCount: 2,
+		});
+
+		expect(result.msgstr).to.deep.equal([""]);
+		expect(result.issues.map((issue) => issue.reason)).to.include(
+			"shortcode_mismatch",
+		);
+	});
+
+	it("allows bracketed UI text that is not a shortcode to be translated", () => {
+		const result = validateEntryTranslation({
+			entry: entry("[View page]"),
+			msgstr: ["[Voir la page]"],
+			pluralCount: 2,
+		});
+
+		expect(result.msgstr).to.deep.equal(["[Voir la page]"]);
+		expect(result.issues).to.deep.equal([]);
+	});
+
+	it("keeps shortcode tokens with attributes protected", () => {
+		const result = validateEntryTranslation({
+			entry: entry('[button url="%s"]View[/button]'),
+			msgstr: ['Voir <a href="%s">'],
 			pluralCount: 2,
 		});
 

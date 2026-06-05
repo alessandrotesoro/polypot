@@ -77,7 +77,7 @@ non-secret defaults to the global YAML config.
 			this.log(`global config: ${paths.globalYaml}`);
 			this.log(`global secrets: ${paths.globalEnv}`);
 			this.log(
-				`OPENAI_API_KEY: ${secrets.hasOpenaiApiKey ? "present" : "missing"}`,
+				`global OPENAI_API_KEY: ${secrets.hasOpenaiApiKey ? "present" : "missing"}`,
 			);
 			if (hasGlobalConfig) {
 				this.log("global config contents:");
@@ -132,7 +132,7 @@ non-secret defaults to the global YAML config.
 		this.log(`global config: ${paths.globalYaml}`);
 		this.log(`global secrets: ${paths.globalEnv}`);
 		this.log(
-			`OPENAI_API_KEY: ${answers.openaiApiKey === undefined && !existingSecrets.hasOpenaiApiKey ? "missing" : "present"}`,
+			`global OPENAI_API_KEY: ${answers.openaiApiKey === undefined && !existingSecrets.hasOpenaiApiKey ? "missing" : "present"}`,
 		);
 	}
 
