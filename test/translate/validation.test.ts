@@ -41,6 +41,14 @@ describe("translation validation", () => {
 		).to.deep.equal([]);
 	});
 
+	it("extracts positional placeholders adjacent to text", () => {
+		expect(
+			extractPlaceholders(
+				"Please %1$srenew your license%2$s or visit %3$sAccount%4$s.",
+			),
+		).to.deep.equal(["%1$s", "%2$s", "%3$s", "%4$s"]);
+	});
+
 	it("keeps translations with matching placeholders", () => {
 		const result = validateEntryTranslation({
 			entry: entry("Hello %s"),
