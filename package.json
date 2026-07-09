@@ -1,5 +1,5 @@
 {
-	"name": "polypot",
+	"name": "@sematico/polypot",
 	"version": "0.1.0",
 	"description": "AI-powered translation CLI for .pot files",
 	"license": "MIT",
@@ -10,9 +10,13 @@
 	},
 	"main": "dist/index.js",
 	"types": "dist/index.d.ts",
+	"publishConfig": {
+		"access": "public"
+	},
 	"files": [
 		"/bin",
 		"/dist",
+		"!/dist/.tsbuildinfo",
 		"/oclif.manifest.json"
 	],
 	"engines": {
@@ -39,30 +43,30 @@
 		}
 	},
 	"dependencies": {
-		"@inquirer/prompts": "^8.4.2",
-		"@oclif/core": "^4.11.1",
+		"@inquirer/prompts": "^8.5.2",
+		"@oclif/core": "^4.11.14",
 		"cli-progress": "^3.12.0",
 		"dotenv": "^17.4.2",
-		"gettext-parser": "^9.0.2",
-		"listr2": "^10.2.1",
-		"openai": "^6.37.0",
-		"yaml": "^2.8.4",
+		"gettext-parser": "^9.1.1",
+		"listr2": "^10.2.2",
+		"openai": "^6.45.0",
+		"yaml": "^2.9.0",
 		"yoctocolors": "^2.1.2",
 		"zod": "^4.4.3"
 	},
 	"devDependencies": {
-		"@biomejs/biome": "2.4.15",
-		"@oclif/test": "^4",
-		"@types/chai": "^5",
+		"@biomejs/biome": "^2.5.3",
+		"@oclif/test": "^4.1.20",
+		"@types/chai": "^5.2.3",
 		"@types/cli-progress": "^3.11.6",
 		"@types/gettext-parser": "^9.0.0",
-		"@types/mocha": "^10",
-		"@types/node": "^22",
-		"chai": "^5",
-		"mocha": "^11",
-		"oclif": "^4",
-		"ts-node": "^10.9.2",
-		"typescript": "^5"
+		"@types/mocha": "^10.0.10",
+		"@types/node": "^26.1.1",
+		"chai": "^6.2.2",
+		"mocha": "^11.7.6",
+		"oclif": "^4.23.27",
+		"tsx": "^4.23.0",
+		"typescript": "^7.0.2"
 	},
 	"overrides": {
 		"diff": "8.0.3",

@@ -1,84 +1,103 @@
 # Polypot
 
-*AI-powered translation for WordPress `.pot` files*
+_AI-assisted gettext translation for WordPress projects_
 
-![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22.13-3c873a?style=flat-square)
-![TypeScript](https://img.shields.io/badge/TypeScript-blue?style=flat-square&logo=typescript&logoColor=white)
-![oclif](https://img.shields.io/badge/CLI-oclif-7c3aed?style=flat-square)
+[![CI](https://github.com/alessandrotesoro/polypot/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/alessandrotesoro/polypot/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/%40sematico%2Fpolypot?style=flat-square)](https://www.npmjs.com/package/@sematico/polypot)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow?style=flat-square)](LICENSE)
 
-Polypot is a TypeScript CLI that turns gettext `.pot` templates into target `.po` files with AI-assisted translations. It is built for WordPress localization workflows where repeatability matters: configure once, initialize each project, then translate with preflight checks, existing translation reuse, and safe output planning.
+Polypot turns WordPress `.pot` templates into ready-to-review `.po` files. It is built for plugin and theme localization workflows where you want AI translation, repeatable configuration, existing PO reuse, and enough validation to avoid shipping broken placeholders or malformed plural strings.
 
-[Features](#features) • [Getting Started](#getting-started) • [Configuration](#configuration) • [Commands](#commands) • [Development](#development)
+[Why Polypot](#why-polypot) | [Install](#install) | [Quick Start](#quick-start) | [Configuration](#configuration) | [Commands](#commands) | [Development](#development)
 
-> [!NOTE]
-> Polypot currently supports OpenAI as the live translation provider. Same-base-language targets, such as `en_US` to `en_GB`, are copied locally without calling a provider.
+> [!IMPORTANT]
+> Polypot `0.1.0` supports OpenAI for live translation. Dry runs, source-language copies, and fully reused existing translations can complete without provider calls.
 
-## Features
+## Why Polypot
 
-- **POT to PO translation** - read source strings from `.pot` files and write one `.po` file per target language.
-- **Existing translation reuse** - merge complete, non-fuzzy translations from existing PO files before planning new work.
-- **Safe preflight planning** - block duplicate output paths, JSON/debug collisions, and writes that would overwrite input files.
-- **WordPress-friendly locales** - normalize common names and aliases like `French`, `fr`, `fra`, and `fr-FR` to canonical locale values like `fr_FR`.
-- **Prompt and dictionary controls** - customize project translation prompts and optionally load dictionary files for consistent terminology.
-- **Dry runs and machine output** - inspect planned work without network calls and emit JSON for automation.
+- **Made for gettext files**: reads `.pot` sources, writes one `.po` file per target locale, and preserves gettext metadata that WordPress expects.
+- **Careful before it writes**: plans output paths, detects collisions, avoids overwriting inputs, and validates placeholders and plural forms.
+- **Reuses what you already have**: complete, non-fuzzy entries from existing PO files are merged before new translation work is planned.
+- **Project-aware by default**: stores reusable prompt and YAML settings in `.polypot/`, while keeping secrets in ignored `.env` files.
+- **Automation-friendly**: supports dry runs, JSON output, debug captures, batch sizing, parallel jobs, and translation limits.
 
-## Getting Started
+## Install
 
-### Prerequisites
+```bash
+npm install --global @sematico/polypot
+polypot --version
+```
+
+### Requirements
 
 - [Node.js](https://nodejs.org/) `>=22.13.0`
 - npm
-- An OpenAI API key for live translation work
+- An OpenAI API key when running live translations
 
-### Install From Source
+## Quick Start
 
-```bash
-git clone https://github.com/alessandrotesoro/polypot.git
-cd polypot
-npm install
-npm run build
-```
-
-During local development, run the CLI through `./bin/run.js`. Once packaged or linked, use the `polypot` binary.
-
-### Quick Start
+Configure the machine once:
 
 ```bash
-# Store global OpenAI defaults on this machine
-./bin/run.js setup
-
-# Create project-local Polypot config
-./bin/run.js init
-
-# Preview work without calling the provider
-./bin/run.js translate -l fr_FR,es_ES -p languages/plugin.pot --dry-run
-
-# Translate and write target PO files
-./bin/run.js translate -l fr_FR,es_ES -p languages/plugin.pot -o languages
+polypot setup
 ```
 
-## How It Works
+Then initialize each WordPress project that has a POT file:
 
-`polypot translate` builds an execution plan before writing files. The plan reads the POT document, resolves config-sourced paths, checks output collisions, decides which existing translations can be reused, and determines whether provider work is actually required.
+```bash
+cd path/to/wp-content/plugins/example-plugin
+polypot init
+```
 
-Existing PO files are reused by default. Complete, non-fuzzy entries are merged into the output; incomplete plurals, fuzzy entries, and previous dry-run placeholders are translated again. Use `--force-translate` when you want to ignore existing translations and regenerate everything.
+Preview the translation plan before spending tokens:
 
-Generated PO files preserve non-dynamic source headers and always write target-specific `Language`, `PO-Revision-Date`, and `Plural-Forms` headers. Polypot intentionally does not load custom PO header templates.
+```bash
+polypot translate \
+  --pot-file-path languages/example-plugin.pot \
+  --target-languages fr_FR,es_ES \
+  --output-dir languages \
+  --dry-run
+```
+
+Run the translation:
+
+```bash
+polypot translate \
+  --pot-file-path languages/example-plugin.pot \
+  --target-languages fr_FR,es_ES \
+  --output-dir languages
+```
 
 ## Configuration
 
-Polypot has two setup layers:
+Polypot resolves configuration from machine defaults, project defaults, environment files, environment variables, and command flags.
 
-| Scope | Command | Files | Purpose |
+| Scope | Command | Files | Use it for |
 | --- | --- | --- | --- |
 | Machine | `polypot setup` | `<configDir>/config.yaml`, `<configDir>/.env` | Shared provider defaults and `OPENAI_API_KEY` |
-| Project | `polypot init` | `.polypot/config.yaml`, `.polypot/prompt.md`, `.polypot/.env` | Project defaults, prompt, and optional project-local secret |
+| Project | `polypot init` | `.polypot/config.yaml`, `.polypot/prompt.md`, `.polypot/.env` | POT path, target locales, output rules, project prompt, optional local secret |
 
-`<configDir>` resolves to `~/.config/polypot` on Linux/macOS and `%LOCALAPPDATA%\polypot` on Windows. Project YAML overrides global YAML at runtime, project `.env` overrides global `.env`, and `.polypot/.env` is added to `.gitignore` by default.
+`<configDir>` resolves to `~/.config/polypot` on macOS/Linux and `%LOCALAPPDATA%\polypot` on Windows. Project values override machine values, and command flags override both.
 
-> [!TIP]
-> Edit `.polypot/prompt.md` to tune translation style for a project, or point `behavior.promptFilePath` at another prompt file.
+> [!NOTE]
+> `polypot init` adds `.polypot/.env` to `.gitignore` by default. Commit `.polypot/config.yaml` and `.polypot/prompt.md`; keep API keys out of git.
+
+### Translation Behavior
+
+`polypot translate` builds a plan before writing PO files. During that planning step it:
+
+1. Reads the configured POT file.
+2. Resolves target locales and output paths.
+3. Loads existing PO files when available.
+4. Reuses complete, non-fuzzy translations unless `--force-translate` is set.
+5. Validates generated strings for gettext placeholders, shortcodes, plural forms, and response shape.
+6. Writes target-specific `Language`, `PO-Revision-Date`, and `Plural-Forms` headers.
+
+Same-base-language targets, such as `en_US` to `en_GB`, are copied locally because no translation provider is needed.
+
+### Prompt And Dictionaries
+
+Every project can carry its own translation style guide in `.polypot/prompt.md`. Edit that file to define tone, brand terminology, formatting rules, or WordPress-specific wording. Dictionary files can also be configured for consistent product and domain terminology across runs.
 
 ## Commands
 
@@ -266,13 +285,29 @@ EXAMPLES
 
 ## Development
 
+Clone the repository and install dependencies:
+
 ```bash
-npm run build      # compile TypeScript to dist/
-npm test           # run the test suite
-npm run check      # run Biome checks and TypeScript type-checking
-npm run readme     # regenerate the oclif command block
+git clone https://github.com/alessandrotesoro/polypot.git
+cd polypot
+npm install
 ```
 
-The command reference above is generated by oclif. When command flags, descriptions, or examples change, run `npm run readme` and keep manual README edits outside the generated command block.
+Useful scripts:
 
-Released under the [MIT License](LICENSE).
+```bash
+npm run build      # compile TypeScript into dist/
+npm test           # run the Mocha test suite
+npm run check      # run Biome checks and TypeScript type checking
+npm run readme     # refresh the generated command reference
+```
+
+During development, run the CLI with `./bin/run.js`:
+
+```bash
+./bin/run.js translate --help
+```
+
+The command reference above is generated by oclif. When command flags, descriptions, or examples change, run `npm run readme` and keep manual edits outside the generated command reference.
+
+MIT licensed. See [LICENSE](LICENSE).
