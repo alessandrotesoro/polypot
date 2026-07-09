@@ -227,7 +227,6 @@ function buildPreflight(
 		"",
 		color.bold("Plan"),
 		row("Targets", preview.languages.map(formatLanguage).join(", ")),
-		row("Workload", "calculated after existing PO merge"),
 		row(
 			"Runtime",
 			`${formatCount(getConcurrentJobs(preview), "job")}, batch size ${preview.batchSize}`,

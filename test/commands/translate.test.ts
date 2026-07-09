@@ -373,7 +373,6 @@ msgstr[1] "%d fichiers"
 		expect(stdout).to.include("Plan");
 		expect(stdout).to.include("Targets");
 		expect(stdout).to.include("Runtime");
-		expect(stdout).to.include("calculated after existing PO merge");
 		expect(stdout).to.include("fr_FR");
 		expect(stdout).to.include("Batch");
 		expect(stdout).to.include("output");
