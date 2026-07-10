@@ -5,6 +5,14 @@
 	"license": "MIT",
 	"author": "",
 	"type": "module",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/alessandrotesoro/polypot.git"
+	},
+	"homepage": "https://github.com/alessandrotesoro/polypot#readme",
+	"bugs": {
+		"url": "https://github.com/alessandrotesoro/polypot/issues"
+	},
 	"bin": {
 		"polypot": "./bin/run.js"
 	},
@@ -31,8 +39,18 @@
 		"check:fix": "biome check --write .",
 		"lint": "biome lint . && npm run typecheck",
 		"lint:fix": "biome lint --write .",
+		"prepack": "npm run build",
 		"typecheck": "tsc --noEmit"
 	},
+	"keywords": [
+		"wordpress",
+		"gettext",
+		"pot",
+		"po",
+		"translation",
+		"localization",
+		"oclif"
+	],
 	"oclif": {
 		"bin": "polypot",
 		"dirname": "polypot",
