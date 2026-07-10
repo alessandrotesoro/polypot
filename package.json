@@ -1,6 +1,6 @@
 {
 	"name": "@sematico/polypot",
-	"version": "0.1.0",
+	"version": "0.1.1",
 	"description": "AI-powered translation CLI for .pot files",
 	"license": "MIT",
 	"author": "",
@@ -39,7 +39,7 @@
 		"check:fix": "biome check --write .",
 		"lint": "biome lint . && npm run typecheck",
 		"lint:fix": "biome lint --write .",
-		"prepack": "npm run build",
+		"prepack": "npm run build && oclif manifest",
 		"typecheck": "tsc --noEmit"
 	},
 	"keywords": [
