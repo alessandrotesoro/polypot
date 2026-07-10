@@ -13,6 +13,7 @@ import {
 import { getPluralCount, getPluralForms } from "./locales.js";
 import { buildPoHeaders } from "./po-headers.js";
 import type { PotDocument, PotEntry } from "./pot.js";
+import { validateEntryTranslation } from "./validation.js";
 import type { ParsedTranslation } from "./xml.js";
 
 export interface ExistingPoMergeResult {
@@ -127,12 +128,20 @@ export function mergeExistingPoData(options: {
 	for (const entry of options.entries) {
 		const existing = getTranslation(options.existing, entry);
 		const target = getTranslation(output, entry);
+		if (existing === undefined || target === undefined) {
+			continue;
+		}
+
+		const validated = validateEntryTranslation({
+			entry,
+			msgstr: existing.msgstr,
+			pluralCount: options.pluralCount,
+		});
 		if (
-			existing === undefined ||
-			target === undefined ||
+			validated.issues.length > 0 ||
 			!isCompleteExistingTranslation({
 				entry,
-				msgstr: existing.msgstr,
+				msgstr: validated.msgstr,
 				pluralCount: options.pluralCount,
 				translationFlags: getTranslationFlags(existing),
 			})
@@ -141,8 +150,8 @@ export function mergeExistingPoData(options: {
 		}
 
 		target.msgstr = entry.plural
-			? resizePluralForms(existing.msgstr, options.pluralCount)
-			: [existing.msgstr[0] ?? ""];
+			? resizePluralForms(validated.msgstr, options.pluralCount)
+			: [validated.msgstr[0] ?? ""];
 		removeFuzzyFlag(target);
 		mergedStrings += 1;
 	}

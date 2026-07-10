@@ -311,6 +311,59 @@ describe("executeTranslate", () => {
 		}
 	});
 
+	it("retranslates existing entries with invalid protected tokens", async () => {
+		const project = await makeProject();
+		const existingPoPath = path.join(project.directory, "existing.po");
+		await fs.writeFile(
+			existingPoPath,
+			`msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\\n"
+
+msgid "Hello"
+msgstr "Bonjour"
+
+msgid "%d file"
+msgid_plural "%d files"
+msgstr[0] "%d fichier"
+msgstr[1] "fichiers"
+`,
+		);
+		const requestedEntries: string[] = [];
+
+		try {
+			const result = await executeTranslate(
+				buildOptions(project, { inputPoPath: existingPoPath }),
+				async (options) => {
+					requestedEntries.push(
+						...options.entries.map((entry) => entry.msgid),
+					);
+					return fakeTranslateBatch(options);
+				},
+			);
+			const output = po.parse(
+				await fs.readFile(
+					path.join(project.directory, "languages/fr_FR.po"),
+				),
+				{ validation: false },
+			);
+
+			expect(result.status).to.equal("completed");
+			expect(result.results[0]).to.deep.include({
+				mergedFromExisting: 1,
+				plannedStrings: 2,
+				translated: 2,
+			});
+			expect(requestedEntries).to.include("%d file");
+			expect(output.translations[""]?.["%d file"]?.msgstr).to.deep.equal([
+				"Un fichier",
+				"%d fichiers",
+			]);
+		} finally {
+			await project.cleanup();
+		}
+	});
+
 	it("processes languages concurrently when global accounting does not require ordering", async () => {
 		const project = await makeProject();
 		let active = 0;

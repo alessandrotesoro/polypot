@@ -31,6 +31,10 @@ msgstr[1] ""
 #: src/a.js:3
 msgid "Removed later"
 msgstr ""
+
+#: src/a.js:4
+msgid "Open %1$slink%2$s."
+msgstr ""
 `;
 
 const EXISTING_PO = `msgid ""
@@ -50,6 +54,9 @@ msgstr[1] "%d fichiers"
 
 msgid "Stale"
 msgstr "Périmé"
+
+msgid "Open %1$slink%2$s."
+msgstr "Ouvrir %1$lien%2$s."
 `;
 
 async function makeProject(): Promise<{
@@ -123,6 +130,9 @@ describe("PO writer", () => {
 			expect(merged.output.translations[""]?.["Stale"]).to.equal(
 				undefined,
 			);
+			expect(
+				merged.output.translations[""]?.["Open %1$slink%2$s."]?.msgstr,
+			).to.deep.equal([""]);
 		} finally {
 			await project.cleanup();
 		}
