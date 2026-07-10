@@ -53,7 +53,20 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Check published package version
+        id: published
+        run: |
+          PACKAGE_NAME="$(node -p "require('./package.json').name")"
+          PACKAGE_VERSION="$(node -p "require('./package.json').version")"
+          if npm view "${PACKAGE_NAME}@${PACKAGE_VERSION}" version >/dev/null 2>&1; then
+            echo "exists=true" >> "${GITHUB_OUTPUT}"
+            echo "${PACKAGE_NAME}@${PACKAGE_VERSION} is already published."
+          else
+            echo "exists=false" >> "${GITHUB_OUTPUT}"
+          fi
+
       - name: Publish to npm
+        if: steps.published.outputs.exists != 'true'
         run: npm publish --access public
 
       - name: Create GitHub release
