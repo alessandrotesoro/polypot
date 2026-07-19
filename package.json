@@ -40,6 +40,7 @@
 		"lint": "biome lint . && npm run typecheck",
 		"lint:fix": "biome lint --write .",
 		"prepack": "npm run build && oclif manifest",
+		"release:verify": "npm run check && npm run build && npm test",
 		"typecheck": "tsc --noEmit"
 	},
 	"keywords": [

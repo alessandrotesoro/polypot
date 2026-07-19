@@ -25,15 +25,24 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Set up pnpm
+        if: hashFiles('pnpm-lock.yaml') != ''
+        uses: pnpm/action-setup@v4
+
       - name: Set up Node.js
         uses: actions/setup-node@v6
         with:
           node-version: 24.x
-          cache: npm
+          package-manager-cache: false
           registry-url: https://registry.npmjs.org
 
       - name: Install dependencies
-        run: npm ci
+        run: |
+          if [ -f pnpm-lock.yaml ]; then
+            pnpm install --frozen-lockfile
+          else
+            npm ci
+          fi
 
       - name: Verify release tag matches package version
         run: |
@@ -44,14 +53,8 @@ jobs:
             exit 1
           fi
 
-      - name: Check
-        run: npm run check
-
-      - name: Build
-        run: npm run build
-
-      - name: Test
-        run: npm test
+      - name: Verify release
+        run: npm run release:verify
 
       - name: Check published package version
         id: published
